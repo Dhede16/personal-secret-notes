@@ -5,9 +5,11 @@
       <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         <!-- Logo -->
         <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-600/30">
-            <span class="text-xl">🔐</span>
-          </div>
+          <img
+            src="/logo.svg"
+            alt="Secret Notes Logo"
+            class="w-10 h-10 rounded-xl shadow-lg shadow-indigo-600/30 object-contain hover:scale-105 transition-transform"
+          />
           <div>
             <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
               Secret Notes
@@ -15,7 +17,6 @@
                 AES-256-GCM
               </span>
             </h1>
-            <p class="text-xs text-slate-400 hidden sm:block">Zero-Knowledge Client-Side Encryption</p>
           </div>
         </div>
 
