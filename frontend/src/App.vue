@@ -123,6 +123,7 @@
       v-if="viewingNote"
       :note="viewingNote"
       :plaintext="viewingPlaintext"
+      :decryption-failed="viewingFailed"
       @lock="handleLockNote"
       @edit="handleEditFromViewer"
       @delete="handleDeleteNote"
@@ -150,6 +151,7 @@
       v-if="decryptionAnim"
       :ciphertext="decryptionAnim.ciphertext"
       :plaintext="decryptionAnim.plaintext"
+      :is-failed="decryptionAnim.isFailed"
       @complete="onDecryptionAnimComplete"
     />
   </div>
@@ -158,7 +160,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { api } from './services/api';
-import { useCrypto } from './composables/useCrypto';
+import { useCrypto, generateScrambledText } from './composables/useCrypto';
 import NoteCard from './components/NoteCard.vue';
 import NoteEditor from './components/NoteEditor.vue';
 import KeyDialog from './components/KeyDialog.vue';
@@ -191,6 +193,7 @@ const keyDialogError = ref('');
 const viewingNote = ref(null);
 const viewingPlaintext = ref('');
 const viewingKey = ref('');
+const viewingFailed = ref(false);
 
 // Delete State
 const deleteTargetNote = ref(null);
@@ -257,6 +260,7 @@ async function handleSaveNote({ id, title, content, key }) {
             viewingNote.value = updated;
             viewingPlaintext.value = content;
             viewingKey.value = key;
+            viewingFailed.value = false;
           }
         } else {
           const created = await api.createNote({ title, ciphertext, iv });
@@ -333,15 +337,32 @@ async function handleKeySubmit(key) {
         viewingNote.value = targetNote;
         viewingPlaintext.value = decrypted;
         viewingKey.value = key;
+        viewingFailed.value = false;
       }
     };
 
     decryptionAnim.value = {
       ciphertext: targetNote.ciphertext,
       plaintext: decrypted,
+      isFailed: false,
     };
   } catch (err) {
-    keyDialogError.value = 'Unable to decrypt note. The provided key may be incorrect.';
+    // When decryption fails (wrong key): still open the note with scrambled text & failed state
+    const scrambled = generateScrambledText(targetNote.ciphertext, key);
+    closeKeyDialog();
+
+    pendingDecryptAction.value = () => {
+      viewingNote.value = targetNote;
+      viewingPlaintext.value = scrambled;
+      viewingKey.value = '';
+      viewingFailed.value = true;
+    };
+
+    decryptionAnim.value = {
+      ciphertext: targetNote.ciphertext,
+      plaintext: scrambled,
+      isFailed: true,
+    };
   } finally {
     isDecrypting.value = false;
   }
@@ -362,6 +383,7 @@ function handleLockNote() {
   viewingNote.value = null;
   viewingPlaintext.value = '';
   viewingKey.value = '';
+  viewingFailed.value = false;
 }
 
 // ------------------- Edit from Viewer -------------------

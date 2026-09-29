@@ -40,6 +40,34 @@ async function deriveKey(keyString) {
   );
 }
 
+/**
+ * Generates deterministic scrambled/corrupted text when decryption fails
+ * @param {string} ciphertextBase64
+ * @param {string} keyString
+ * @returns {string}
+ */
+export function generateScrambledText(ciphertextBase64, keyString = '') {
+  try {
+    const raw = atob(ciphertextBase64);
+    const chars = '█▓▒░#@!$%&*?/~^+=<>{}[]()|\\;:,.~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ§±µ¿Ø×¶';
+    let seed = 0;
+    for (let i = 0; i < keyString.length; i++) {
+      seed = (seed * 31 + keyString.charCodeAt(i)) >>> 0;
+    }
+    let result = '';
+    const length = Math.max(30, Math.min(raw.length * 2, 400));
+    for (let i = 0; i < length; i++) {
+      const code = (raw.charCodeAt(i % raw.length) ^ (seed + i * 17)) % chars.length;
+      result += chars[Math.abs(code) % chars.length];
+      if (i > 0 && i % 48 === 0) result += '\n';
+      else if (i > 0 && i % 8 === 0) result += ' ';
+    }
+    return result;
+  } catch (e) {
+    return '§k9#@!~?¿Ø×¶… %#@!*&^%$§¿Ø×¶…\n[DATA GAGAL TERDEKRIPSI / KUNCI SALAH]';
+  }
+}
+
 export function useCrypto() {
   /**
    * Encrypts plaintext string using AES-256-GCM with a random 12-byte IV
@@ -117,5 +145,6 @@ export function useCrypto() {
   return {
     encryptNote,
     decryptNote,
+    generateScrambledText,
   };
 }
