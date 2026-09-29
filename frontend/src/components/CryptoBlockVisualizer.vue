@@ -693,6 +693,7 @@ function completeAllBlocks() {
 function proceed() {
   completeAllBlocks();
   emit('complete');
+  emit('close');
 }
 
 function switchMode(newMode) {
@@ -701,15 +702,27 @@ function switchMode(newMode) {
   initBlocks();
 }
 
+function handleKeydown(e) {
+  if (e.key === 'Escape' && !props.isEmbedded) {
+    emit('close');
+  }
+}
+
 watch(() => props.ciphertext, () => {
   initBlocks();
 });
 
 onMounted(() => {
+  if (!props.isEmbedded) {
+    window.addEventListener('keydown', handleKeydown);
+  }
   initBlocks();
 });
 
 onUnmounted(() => {
+  if (!props.isEmbedded) {
+    window.removeEventListener('keydown', handleKeydown);
+  }
   clearTimeout(timer);
 });
 </script>
