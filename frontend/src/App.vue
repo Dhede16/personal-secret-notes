@@ -19,17 +19,31 @@
           </div>
         </div>
 
-        <!-- Add Note Button -->
-        <button
-          type="button"
-          @click="openCreateModal"
-          class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-sm font-semibold rounded-xl shadow-lg shadow-indigo-600/25 transition-all"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4" />
-          </svg>
-          <span>New Note</span>
-        </button>
+        <!-- Header Actions -->
+        <div class="flex items-center gap-2 sm:gap-3">
+          <!-- Interactive Visualizer Sandbox Button -->
+          <button
+            type="button"
+            @click="showSandboxModal = true"
+            class="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800/90 hover:bg-slate-700/90 active:scale-95 text-indigo-300 text-xs sm:text-sm font-semibold rounded-xl border border-indigo-500/30 transition-all cursor-pointer shadow"
+            title="Eksplorasi visualisasi blok AES-256-GCM interaktif"
+          >
+            <span>🔬</span>
+            <span>Block Visualizer</span>
+          </button>
+
+          <!-- Add Note Button -->
+          <button
+            type="button"
+            @click="openCreateModal"
+            class="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-lg shadow-indigo-600/25 transition-all cursor-pointer"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4" />
+            </svg>
+            <span>New Note</span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -143,6 +157,7 @@
       v-if="encryptionAnim"
       :plaintext="encryptionAnim.plaintext"
       :ciphertext="encryptionAnim.ciphertext"
+      :iv="encryptionAnim.iv"
       @complete="onEncryptionAnimComplete"
     />
 
@@ -151,8 +166,15 @@
       v-if="decryptionAnim"
       :ciphertext="decryptionAnim.ciphertext"
       :plaintext="decryptionAnim.plaintext"
+      :iv="decryptionAnim.iv"
       :is-failed="decryptionAnim.isFailed"
       @complete="onDecryptionAnimComplete"
+    />
+
+    <!-- Interactive Visualizer Sandbox Modal -->
+    <InteractiveVisualizerModal
+      v-if="showSandboxModal"
+      @close="showSandboxModal = false"
     />
   </div>
 </template>
@@ -168,6 +190,7 @@ import NoteViewer from './components/NoteViewer.vue';
 import DeleteConfirm from './components/DeleteConfirm.vue';
 import EncryptionAnimation from './components/EncryptionAnimation.vue';
 import DecryptionAnimation from './components/DecryptionAnimation.vue';
+import InteractiveVisualizerModal from './components/InteractiveVisualizerModal.vue';
 
 const { encryptNote, decryptNote } = useCrypto();
 
@@ -175,6 +198,7 @@ const { encryptNote, decryptNote } = useCrypto();
 const notes = ref([]);
 const isLoadingNotes = ref(true);
 const globalError = ref('');
+const showSandboxModal = ref(false);
 
 // Editor State
 const showEditor = ref(false);
@@ -277,6 +301,7 @@ async function handleSaveNote({ id, title, content, key }) {
     encryptionAnim.value = {
       plaintext: content,
       ciphertext: ciphertext,
+      iv: iv,
     };
   } catch (err) {
     alert(err.message || 'Encryption failed.');
@@ -344,6 +369,7 @@ async function handleKeySubmit(key) {
     decryptionAnim.value = {
       ciphertext: targetNote.ciphertext,
       plaintext: decrypted,
+      iv: targetNote.iv,
       isFailed: false,
     };
   } catch (err) {
@@ -361,6 +387,7 @@ async function handleKeySubmit(key) {
     decryptionAnim.value = {
       ciphertext: targetNote.ciphertext,
       plaintext: scrambled,
+      iv: targetNote.iv,
       isFailed: true,
     };
   } finally {

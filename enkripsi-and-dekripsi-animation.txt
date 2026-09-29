@@ -1,0 +1,796 @@
+# AES-256-GCM Encryption & Decryption Block Visualization
+
+Buat sebuah komponen visualisasi interaktif untuk aplikasi **Secret Notes** yang menjelaskan proses enkripsi dan dekripsi menggunakan **AES-256-GCM** secara visual melalui konsep **blok 16 byte**.
+
+## Tujuan
+
+Visualisasi harus membantu pengguna memahami bahwa AES merupakan block cipher dengan ukuran blok **128-bit (16 byte)**.
+
+Visualisasi harus menampilkan plaintext yang dibagi secara visual menjadi beberapa blok, kemudian setiap blok divisualisasikan seolah-olah melewati proses AES-256-GCM dan menghasilkan ciphertext.
+
+**PENTING:** visualisasi blok hanya merupakan representasi edukatif. Jangan melakukan enkripsi sebenarnya secara terpisah untuk setiap blok.
+
+Implementasi kriptografi sebenarnya harus tetap menggunakan:
+
+```javascript
+crypto.subtle.encrypt()
+crypto.subtle.decrypt()
+```
+
+terhadap keseluruhan plaintext/ciphertext.
+
+---
+
+# 1. Contoh Data
+
+Gunakan teks contoh:
+
+```text
+Hello World, this is my secret note
+```
+
+Tampilkan plaintext tersebut dalam bentuk blok 16 byte.
+
+Contoh visual:
+
+```text
+PLAINTEXT
+
+┌────────────────────────┐
+│ H e l l o _ W          │
+│        BLOCK 1          │
+└────────────────────────┘
+
+┌────────────────────────┐
+│ o r l d , _ t          │
+│        BLOCK 2          │
+└────────────────────────┘
+
+┌────────────────────────┐
+│ h i s _ i s _ m        │
+│        BLOCK 3          │
+└────────────────────────┘
+
+┌────────────────────────┐
+│ y _ s e c r e t        │
+│        BLOCK 4          │
+└────────────────────────┘
+
+┌────────────────────────┐
+│ _ n o t e              │
+│        BLOCK 5          │
+└────────────────────────┘
+```
+
+Gunakan spasi kosong atau placeholder yang jelas untuk byte yang tidak terisi pada blok terakhir.
+
+Jangan mengubah karakter spasi menjadi `_` pada implementasi sebenarnya. `_` hanya boleh digunakan sebagai visual representation agar spasi terlihat jelas.
+
+---
+
+# 2. Layout Visualisasi
+
+Gunakan layout vertikal yang jelas:
+
+```text
+              PLAINTEXT
+                  │
+                  ▼
+
+        ┌──────────────────┐
+        │ BLOCK 1           │
+        │ H e l l o _ W     │
+        └──────────────────┘
+                  │
+                  ▼
+        ┌──────────────────┐
+        │ 🔐 AES-256-GCM   │
+        └──────────────────┘
+                  │
+                  ▼
+        ┌──────────────────┐
+        │ CIPHER BLOCK 1   │
+        │ 8F A2 91 7C ... │
+        └──────────────────┘
+
+                  ↓
+
+        ┌──────────────────┐
+        │ BLOCK 2           │
+        │ o r l d , _ t     │
+        └──────────────────┘
+                  │
+                  ▼
+        ┌──────────────────┐
+        │ 🔐 AES-256-GCM   │
+        └──────────────────┘
+                  │
+                  ▼
+        ┌──────────────────┐
+        │ CIPHER BLOCK 2   │
+        │ 4B 72 C1 9A ... │
+        └──────────────────┘
+```
+
+Namun jangan menampilkan semua blok secara aktif sekaligus jika hal tersebut membuat UI terlalu panjang.
+
+Gunakan animasi sequential:
+
+```text
+Block 1
+   ↓
+AES-256-GCM
+   ↓
+Cipher Block 1
+   ↓
+Block 2
+   ↓
+AES-256-GCM
+   ↓
+Cipher Block 2
+   ↓
+...
+```
+
+---
+
+# 3. Encryption Animation
+
+Ketika pengguna memilih mode **Encrypt**, lakukan urutan:
+
+### Step 1 — Show Plaintext
+
+Tampilkan:
+
+```text
+Plaintext
+
+Hello World, this is my secret note
+```
+
+Kemudian teks dibagi menjadi blok.
+
+### Step 2 — Split into Blocks
+
+Animasi membagi plaintext menjadi:
+
+```text
+BLOCK 1
+H e l l o _ W
+
+BLOCK 2
+o r l d , _ t
+
+BLOCK 3
+h i s _ i s _ m
+
+BLOCK 4
+y _ s e c r e t
+
+BLOCK 5
+_ n o t e
+```
+
+Gunakan animasi smooth seperti:
+
+* fade
+* slide
+* highlight
+* border transition
+
+### Step 3 — Process Block
+
+Block pertama menjadi aktif:
+
+```text
+┌─────────────────────┐
+│ BLOCK 1             │
+│ H e l l o _ W       │
+└─────────────────────┘
+          │
+          ▼
+    🔐 AES-256-GCM
+```
+
+Gunakan efek visual seperti:
+
+* glow ringan
+* progress indicator
+* rotating/processing icon
+* subtle pulse
+
+Jangan menggunakan efek berlebihan.
+
+### Step 4 — Generate Cipher Visualization
+
+Setelah proses selesai, tampilkan:
+
+```text
+┌─────────────────────┐
+│ CIPHER BLOCK 1      │
+│ 8F A2 91 7C 3D ...  │
+└─────────────────────┘
+```
+
+**Ciphertext yang ditampilkan harus berasal dari hasil enkripsi AES-256-GCM sebenarnya**, bukan string random yang dibuat untuk animasi.
+
+Jika ciphertext terlalu panjang, tampilkan sebagian byte pada card dan sediakan opsi untuk melihat seluruh ciphertext.
+
+### Step 5 — Continue
+
+Lanjutkan ke:
+
+```text
+BLOCK 2
+      ↓
+AES-256-GCM
+      ↓
+CIPHER BLOCK 2
+
+BLOCK 3
+      ↓
+AES-256-GCM
+      ↓
+CIPHER BLOCK 3
+```
+
+hingga semua blok selesai.
+
+### Step 6 — Complete
+
+Setelah semua selesai:
+
+```text
+✓ Encryption Complete
+
+5 blocks processed
+AES-256-GCM
+```
+
+Tampilkan ciphertext final secara keseluruhan dalam Base64.
+
+---
+
+# 4. Decryption Animation
+
+Sediakan mode:
+
+```text
+Encrypt | Decrypt
+```
+
+Ketika mode **Decrypt** dipilih, arah visualisasi dibalik.
+
+Contoh:
+
+```text
+CIPHERTEXT
+
+┌─────────────────────┐
+│ CIPHER BLOCK 1      │
+│ 8F A2 91 7C 3D ...  │
+└─────────────────────┘
+          │
+          ▼
+    🔓 AES-256-GCM
+          │
+          ▼
+┌─────────────────────┐
+│ BLOCK 1             │
+│ H e l l o _ W       │
+└─────────────────────┘
+```
+
+Kemudian:
+
+```text
+CIPHER BLOCK 2
+      ↓
+AES-256-GCM
+      ↓
+BLOCK 2
+
+CIPHER BLOCK 3
+      ↓
+AES-256-GCM
+      ↓
+BLOCK 3
+```
+
+hingga seluruh plaintext berhasil direkonstruksi.
+
+Akhiri dengan:
+
+```text
+✓ Decryption Complete
+
+Plaintext reconstructed successfully.
+```
+
+---
+
+# 5. Real Cryptography
+
+Jangan membuat algoritma AES sendiri.
+
+Gunakan **Web Crypto API**:
+
+```javascript
+crypto.subtle.encrypt()
+crypto.subtle.decrypt()
+```
+
+Gunakan:
+
+```javascript
+AES-GCM
+```
+
+dengan:
+
+```text
+Key size: 256 bit
+Block size: 128 bit
+IV/Nonce: 12 bytes recommended
+```
+
+Gunakan:
+
+```javascript
+crypto.getRandomValues()
+```
+
+untuk menghasilkan IV.
+
+Jangan gunakan:
+
+```javascript
+Math.random()
+```
+
+untuk key atau IV.
+
+---
+
+# 6. Penting — Block Visualization vs Actual Encryption
+
+Jangan implementasikan:
+
+```javascript
+encrypt(block1)
+encrypt(block2)
+encrypt(block3)
+```
+
+Karena itu **bukan implementasi AES-GCM yang diinginkan** untuk aplikasi ini.
+
+Implementasi sebenarnya harus:
+
+```javascript
+encrypt(
+    entirePlaintext,
+    key,
+    iv
+)
+```
+
+Kemudian ciphertext hasil operasi tersebut digunakan untuk membuat visualisasi blok.
+
+Dengan kata lain:
+
+```text
+                  ACTUAL CRYPTOGRAPHY
+
+Entire Plaintext
+       │
+       ▼
+AES-256-GCM
+       │
+       ▼
+Entire Ciphertext
+
+
+                  VISUALIZATION
+
+Plaintext
+   │
+   ├── Block 1 ──► visual processing ──► Cipher representation
+   ├── Block 2 ──► visual processing ──► Cipher representation
+   ├── Block 3 ──► visual processing ──► Cipher representation
+   └── ...
+```
+
+Visualisasi tidak boleh mengubah hasil kriptografi.
+
+---
+
+# 7. Byte Visualization
+
+Tampilkan byte dalam hexadecimal agar pengguna dapat melihat representasi data.
+
+Contoh:
+
+```text
+Plaintext bytes
+
+48 65 6C 6C 6F 20 57 6F
+72 6C 64 2C 20 74 68 69
+73 20 69 73 20 6D 79 20
+...
+```
+
+Kemudian grouping:
+
+```text
+BLOCK 1
+48 65 6C 6C 6F 20 57 6F
+
+BLOCK 2
+72 6C 64 2C 20 74 68 69
+
+BLOCK 3
+73 20 69 73 20 6D 79 20
+```
+
+Tetapi jelaskan secara visual bahwa grouping tersebut adalah **visualisasi blok**, bukan berarti aplikasi memanggil AES-GCM satu kali untuk setiap block.
+
+---
+
+# 8. IV dan Authentication Tag
+
+Tambahkan informasi kecil di bagian bawah:
+
+```text
+Algorithm
+AES-256-GCM
+
+Key
+256-bit
+
+Block Size
+128-bit
+
+IV / Nonce
+96-bit
+
+Authentication Tag
+128-bit
+```
+
+Jangan menampilkan encryption key asli kepada pengguna.
+
+IV boleh ditampilkan karena IV bukan secret.
+
+Authentication tag boleh ditampilkan sebagai bagian dari hasil teknis, tetapi jangan membingungkan pengguna dengan menganggapnya sebagai ciphertext biasa.
+
+---
+
+# 9. Interactive Controls
+
+Sediakan:
+
+```text
+[ Encrypt ] [ Decrypt ]
+
+[▶ Start]
+[⏸ Pause]
+[↻ Restart]
+```
+
+Tambahkan:
+
+```text
+Animation Speed
+Slow ─────●───── Fast
+```
+
+Progress:
+
+```text
+Block 3 / 5
+
+████████████░░░░░░░░
+```
+
+User dapat:
+
+* Start
+* Pause
+* Resume
+* Restart
+* Change animation speed
+
+---
+
+# 10. Visual Design
+
+Gunakan desain modern dan minimal.
+
+Karakteristik:
+
+* clean
+* modern
+* dark/light mode compatible
+* rounded corners
+* subtle border
+* subtle shadow
+* monospace font untuk byte/ciphertext
+* sans-serif untuk label
+* smooth transitions
+* tidak terlalu banyak warna
+* tidak menggunakan efek hacker berlebihan
+* tidak menggunakan matrix/rain effect
+
+Gunakan visual hierarchy yang jelas.
+
+Status:
+
+```text
+Plaintext
+↓
+Block
+↓
+AES-256-GCM
+↓
+Ciphertext
+```
+
+Gunakan icon:
+
+```text
+🔒 Encryption
+🔓 Decryption
+```
+
+atau icon SVG/ikon UI yang lebih profesional.
+
+---
+
+# 11. Animation Behavior
+
+Setiap blok harus memiliki state:
+
+```text
+idle
+↓
+active
+↓
+processing
+↓
+completed
+```
+
+Contoh:
+
+```text
+BLOCK 1
+   ↓
+ACTIVE
+   ↓
+PROCESSING
+   ↓
+COMPLETED ✓
+```
+
+Block yang sudah selesai tetap terlihat tetapi menjadi lebih redup.
+
+Block yang sedang diproses menjadi fokus utama.
+
+Gunakan animasi sekitar:
+
+```text
+800ms – 1500ms
+```
+
+per block secara default.
+
+Animation speed harus dapat diubah pengguna.
+
+Hormati:
+
+```css
+prefers-reduced-motion
+```
+
+Jika pengguna mengaktifkan reduced motion, tampilkan state secara instan atau dengan animasi minimal.
+
+---
+
+# 12. Educational Information
+
+Tambahkan tooltip atau info kecil:
+
+> AES memiliki block size 128-bit (16 byte). AES-256 menunjukkan ukuran encryption key sebesar 256-bit, bukan ukuran block.
+
+Tambahkan informasi:
+
+> Visualisasi block di sini digunakan untuk menjelaskan struktur data AES. Enkripsi sebenarnya dilakukan oleh AES-256-GCM melalui Web Crypto API terhadap keseluruhan pesan.
+
+Ini penting agar visualisasi tidak memberikan pemahaman teknis yang salah.
+
+---
+
+# 13. Integration with Secret Notes
+
+Komponen harus dapat digunakan ketika:
+
+### Create Note
+
+```text
+User writes plaintext
+        ↓
+Save
+        ↓
+Encrypt
+        ↓
+Show Encryption Animation
+        ↓
+Save ciphertext + IV
+```
+
+### Open Note
+
+```text
+User selects note
+        ↓
+Enter key
+        ↓
+Decrypt
+        ↓
+Show Decryption Animation
+        ↓
+Show plaintext
+```
+
+### Edit Note
+
+```text
+Decrypt
+   ↓
+Edit plaintext
+   ↓
+Encrypt again
+   ↓
+Generate NEW IV
+   ↓
+Show Encryption Animation
+   ↓
+Save updated ciphertext
+```
+
+---
+
+# 14. Security Requirements
+
+Jangan pernah:
+
+* menyimpan key di JSON
+* menyimpan key di localStorage
+* menyimpan key di sessionStorage
+* mengirim key ke FastAPI
+* menyimpan plaintext di backend
+* memasukkan key ke URL
+* memasukkan key ke cookie
+* log plaintext
+* log encryption key
+
+Backend hanya menerima:
+
+```json
+{
+  "title": "My Secret Note",
+  "ciphertext": "...",
+  "iv": "..."
+}
+```
+
+Encryption dan decryption harus terjadi di browser.
+
+---
+
+# 15. Acceptance Criteria
+
+Visualisasi dianggap selesai jika:
+
+* [ ] Plaintext dapat dibagi secara visual menjadi blok 16 byte.
+* [ ] Setiap block memiliki visual state.
+* [ ] Block aktif dianimasikan menuju AES-256-GCM.
+* [ ] Ciphertext hasil enkripsi sebenarnya ditampilkan.
+* [ ] Decryption memiliki animasi arah sebaliknya.
+* [ ] Visualisasi tidak melakukan enkripsi AES-GCM secara terpisah per block.
+* [ ] Web Crypto API digunakan untuk operasi kriptografi sebenarnya.
+* [ ] AES-256-GCM digunakan.
+* [ ] Key berukuran 256-bit.
+* [ ] IV dibuat menggunakan cryptographically secure random generator.
+* [ ] IV baru dibuat setiap kali melakukan encryption.
+* [ ] Authentication failure ditangani dengan baik.
+* [ ] Wrong key menampilkan error yang jelas.
+* [ ] Pause/resume bekerja.
+* [ ] Restart bekerja.
+* [ ] Animation speed dapat diubah.
+* [ ] prefers-reduced-motion didukung.
+* [ ] Responsive pada desktop dan mobile.
+* [ ] Tidak ada plaintext atau key yang dikirim ke backend.
+* [ ] Tidak ada custom AES implementation.
+
+## Hasil Akhir yang Diinginkan
+
+Komponen harus terasa seperti **interactive cryptography visualization**, bukan sekadar loading animation.
+
+Pengguna harus dapat melihat perjalanan data:
+
+```text
+                 ENCRYPTION
+
+Plaintext
+    ↓
+┌───────────┐
+│ Block 1   │
+└───────────┘
+    ↓
+┌───────────┐
+│ AES-GCM   │
+└───────────┘
+    ↓
+┌───────────┐
+│ Cipher 1  │
+└───────────┘
+
+    ↓
+
+┌───────────┐
+│ Block 2   │
+└───────────┘
+    ↓
+┌───────────┐
+│ AES-GCM   │
+└───────────┘
+    ↓
+┌───────────┐
+│ Cipher 2  │
+└───────────┘
+
+    ↓
+
+✓ Encryption Complete
+```
+
+Dan:
+
+```text
+                 DECRYPTION
+
+Ciphertext
+    ↓
+┌───────────┐
+│ Cipher 1  │
+└───────────┘
+    ↓
+┌───────────┐
+│ AES-GCM   │
+└───────────┘
+    ↓
+┌───────────┐
+│ Block 1   │
+└───────────┘
+
+    ↓
+
+┌───────────┐
+│ Cipher 2  │
+└───────────┘
+    ↓
+┌───────────┐
+│ AES-GCM   │
+└───────────┘
+    ↓
+┌───────────┐
+│ Block 2   │
+└───────────┘
+
+    ↓
+
+✓ Decryption Complete
+```
+
+Prioritaskan **akurasi konsep kriptografi, visual clarity, smooth animation, dan integrasi dengan Web Crypto API**.

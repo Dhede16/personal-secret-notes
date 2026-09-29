@@ -68,12 +68,58 @@ export function generateScrambledText(ciphertextBase64, keyString = '') {
   }
 }
 
+/**
+ * Converts a byte number to 2-char uppercase Hex
+ */
+export function byteToHex(byte) {
+  return byte.toString(16).padStart(2, '0').toUpperCase();
+}
+
+/**
+ * Splits an ArrayBuffer or Uint8Array into 16-byte chunks
+ * @param {Uint8Array|ArrayBuffer} data
+ * @param {number} blockSize
+ * @returns {Uint8Array[]}
+ */
+export function splitIntoBlocks(data, blockSize = 16) {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  if (bytes.length === 0) {
+    return [new Uint8Array(0)];
+  }
+  const blocks = [];
+  for (let i = 0; i < bytes.length; i += blockSize) {
+    blocks.push(bytes.slice(i, i + blockSize));
+  }
+  return blocks;
+}
+
+/**
+ * Extracts ciphertext payload and 16-byte Authentication Tag from AES-GCM base64 string
+ * In Web Crypto AES-GCM, the last 16 bytes (128 bits) of the ciphertext buffer are the GMAC tag.
+ * @param {string} ciphertextBase64
+ * @returns {{ cipherBytes: Uint8Array, tagBytes: Uint8Array, rawBytes: Uint8Array }}
+ */
+export function parseEncryptedPayload(ciphertextBase64) {
+  try {
+    const buffer = base64ToBuffer(ciphertextBase64);
+    const rawBytes = new Uint8Array(buffer);
+    if (rawBytes.length >= 16) {
+      const cipherBytes = rawBytes.slice(0, rawBytes.length - 16);
+      const tagBytes = rawBytes.slice(rawBytes.length - 16);
+      return { cipherBytes, tagBytes, rawBytes };
+    }
+    return { cipherBytes: rawBytes, tagBytes: new Uint8Array(0), rawBytes };
+  } catch (e) {
+    return { cipherBytes: new Uint8Array(0), tagBytes: new Uint8Array(0), rawBytes: new Uint8Array(0) };
+  }
+}
+
 export function useCrypto() {
   /**
    * Encrypts plaintext string using AES-256-GCM with a random 12-byte IV
    * @param {string} plaintext
    * @param {string} keyString
-   * @returns {Promise<{ciphertext: string, iv: string}>}
+   * @returns {Promise<{ciphertext: string, iv: string, rawEncrypted: ArrayBuffer}>}
    */
   async function encryptNote(plaintext, keyString) {
     if (!plaintext || typeof plaintext !== 'string') {
@@ -102,6 +148,7 @@ export function useCrypto() {
     return {
       ciphertext: bufferToBase64(encryptedBuffer),
       iv: bufferToBase64(iv),
+      rawEncrypted: encryptedBuffer,
     };
   }
 
@@ -146,5 +193,9 @@ export function useCrypto() {
     encryptNote,
     decryptNote,
     generateScrambledText,
+    byteToHex,
+    splitIntoBlocks,
+    parseEncryptedPayload,
   };
 }
+
