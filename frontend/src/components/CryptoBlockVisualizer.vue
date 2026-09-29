@@ -1,10 +1,21 @@
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-4 overflow-y-auto">
+  <div
+    :class="[
+      isEmbedded
+        ? 'w-full flex flex-col space-y-4'
+        : 'fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-4 overflow-y-auto'
+    ]"
+    @click.self="!isEmbedded && $emit('close')"
+  >
     <div
-      class="w-full max-w-3xl bg-slate-900 border border-slate-700/80 rounded-2xl p-4 sm:p-6 shadow-2xl flex flex-col text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-200"
+      :class="[
+        isEmbedded
+          ? 'w-full flex flex-col text-slate-100'
+          : 'w-full max-w-3xl bg-slate-900 border border-slate-700/80 rounded-2xl p-4 sm:p-6 shadow-2xl flex flex-col text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-200'
+      ]"
     >
-      <!-- Header -->
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-800">
+      <!-- Header (Hidden when isEmbedded because parent modal has its own header) -->
+      <div v-if="!isEmbedded" class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-800">
         <div class="flex items-center gap-3">
           <div
             class="w-10 h-10 rounded-xl border flex items-center justify-center shadow-inner shrink-0"
@@ -36,23 +47,37 @@
           </div>
         </div>
 
-        <!-- Mode Toggle (If in standalone interactive sandbox mode) -->
-        <div v-if="allowModeSwitch" class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 self-start sm:self-auto">
+        <div class="flex items-center gap-2">
+          <!-- Mode Toggle (If in standalone interactive sandbox mode) -->
+          <div v-if="allowModeSwitch" class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 self-start sm:self-auto">
+            <button
+              type="button"
+              @click="switchMode('encrypt')"
+              class="px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer"
+              :class="currentMode === 'encrypt' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+            >
+              🔒 Encrypt
+            </button>
+            <button
+              type="button"
+              @click="switchMode('decrypt')"
+              class="px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer"
+              :class="currentMode === 'decrypt' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+            >
+              🔓 Decrypt
+            </button>
+          </div>
+
+          <!-- Close X button -->
           <button
             type="button"
-            @click="switchMode('encrypt')"
-            class="px-3 py-1 text-xs font-semibold rounded-lg transition-all"
-            :class="currentMode === 'encrypt' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+            @click="$emit('close')"
+            class="text-slate-400 hover:text-slate-200 hover:bg-slate-800 p-2 rounded-xl transition-all cursor-pointer shrink-0"
+            title="Tutup (Esc)"
           >
-            🔒 Encrypt
-          </button>
-          <button
-            type="button"
-            @click="switchMode('decrypt')"
-            class="px-3 py-1 text-xs font-semibold rounded-lg transition-all"
-            :class="currentMode === 'decrypt' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
-          >
-            🔓 Decrypt
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
       </div>
@@ -487,6 +512,10 @@ const props = defineProps({
     default: false,
   },
   allowModeSwitch: {
+    type: Boolean,
+    default: false,
+  },
+  isEmbedded: {
     type: Boolean,
     default: false,
   },
