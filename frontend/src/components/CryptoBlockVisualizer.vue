@@ -140,34 +140,68 @@
         </div>
       </div>
 
-      <!-- AES-256 key schedule -->
+      <!-- AES-256 round flow and key expansion -->
       <details v-if="keyString" open class="mb-4 bg-slate-950/80 border border-amber-500/30 rounded-xl p-3 text-xs">
         <summary class="cursor-pointer font-bold text-amber-300">
-          Tahap Key Expansion AES-256 · 256-bit menjadi 15 Round Key
+          Alur Putaran AES-256 & Key Expansion · 14 Putaran
         </summary>
         <div class="mt-3 space-y-3">
           <p class="text-[11px] leading-relaxed text-slate-400">
-            Passphrase di-hash dengan SHA-256 menjadi K0 (8 word / 32 byte). Ekspansi membentuk W0–W59: setiap 8 word memakai RotWord, SubWord, dan Rcon; word ke-4 memakai SubWord; hasilnya di-XOR dengan word ke-8 sebelumnya.
+            Passphrase di-hash dengan SHA-256 menjadi kunci 256-bit. Pada mode GCM, AES memproses counter 128-bit untuk membentuk keystream; keystream lalu di-XOR dengan plaintext saat enkripsi atau ciphertext saat dekripsi.
           </p>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
-            <div class="rounded-lg border border-slate-800 bg-slate-900 p-2">
-              <div class="text-[10px] text-slate-500 mb-1">SHA-256(PASSPHRASE) · KUNCI AWAL</div>
-              <div class="break-all text-amber-200">{{ derivedKeyHex || 'Menghitung...' }}</div>
-            </div>
-            <div class="rounded-lg border border-slate-800 bg-slate-900 p-2">
-              <div class="text-[10px] text-slate-500 mb-1">TRANSFORMASI KUNCI</div>
-              <div class="text-cyan-200">RotWord → SubWord → XOR Rcon → XOR W[i−8]</div>
-              <div class="mt-1 text-slate-400">AES-256 juga memakai SubWord saat i mod 8 = 4.</div>
-            </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <section class="rounded-lg border border-slate-800 bg-slate-900/70 p-3" aria-label="Alur putaran AES-256">
+              <h4 class="text-[10px] font-bold uppercase tracking-wider text-slate-300 mb-2">Alur AES Block · Counter 128-bit</h4>
+              <div class="space-y-1.5 text-center">
+                <div class="rounded border border-cyan-500/30 bg-cyan-950/30 px-2 py-1.5 text-cyan-200">Counter Block / AES State</div>
+                <div class="text-slate-500" aria-hidden="true">↓</div>
+                <div class="rounded border border-sky-500/40 bg-sky-950/40 px-2 py-1.5 text-sky-200">AddRoundKey · K0 (kunci awal)</div>
+                <div class="text-slate-500" aria-hidden="true">↓</div>
+                <div class="grid grid-cols-3 gap-1">
+                  <div class="rounded border border-slate-700 bg-slate-950 px-1 py-1 text-[10px] text-slate-300">SubBytes</div>
+                  <div class="rounded border border-slate-700 bg-slate-950 px-1 py-1 text-[10px] text-slate-300">ShiftRows</div>
+                  <div class="rounded border border-slate-700 bg-slate-950 px-1 py-1 text-[10px] text-slate-300">MixColumns</div>
+                </div>
+                <div class="rounded border border-sky-500/40 bg-sky-950/40 px-2 py-1.5 text-sky-200">AddRoundKey · K1</div>
+                <div class="text-slate-500" aria-hidden="true">↓</div>
+                <div class="rounded border border-emerald-500/30 bg-emerald-950/30 px-2 py-2 text-emerald-200">
+                  <div class="font-semibold">Putaran 2–13 · 12 putaran</div>
+                  <div class="mt-0.5 text-[10px] text-emerald-300/80">SubBytes → ShiftRows → MixColumns → AddRoundKey (K2–K13)</div>
+                </div>
+                <div class="text-slate-500" aria-hidden="true">↓</div>
+                <div class="rounded border border-fuchsia-500/30 bg-fuchsia-950/30 px-2 py-2 text-fuchsia-200">
+                  <div class="font-semibold">Putaran 14 · tanpa MixColumns</div>
+                  <div class="mt-0.5 text-[10px] text-fuchsia-300/80">SubBytes → ShiftRows → AddRoundKey (K14)</div>
+                </div>
+                <div class="text-slate-500" aria-hidden="true">↓</div>
+                <div class="rounded border border-amber-500/30 bg-amber-950/30 px-2 py-1.5 text-amber-200">Keystream Block → XOR data</div>
+              </div>
+            </section>
+
+            <section class="rounded-lg border border-slate-800 bg-slate-900/70 p-3" aria-label="Proses ekspansi kunci AES-256">
+              <h4 class="text-[10px] font-bold uppercase tracking-wider text-slate-300 mb-2">Cipher Key → Key Expansion</h4>
+              <div class="rounded border border-amber-500/30 bg-amber-950/20 p-2 font-mono">
+                <div class="text-[10px] text-slate-500 mb-1">SHA-256(PASSPHRASE) · 256-bit</div>
+                <div class="break-all text-[10px] text-amber-200">{{ derivedKeyHex || 'Menghitung...' }}</div>
+              </div>
+              <div class="py-1.5 text-center text-slate-500" aria-hidden="true">↓</div>
+              <div class="rounded border border-lime-500/30 bg-lime-950/20 p-2">
+                <div class="font-semibold text-lime-200">Ekspansi W0–W59</div>
+                <div class="mt-1 text-[10px] leading-relaxed text-slate-300">i mod 8 = 0: RotWord → SubWord → XOR Rcon; i mod 8 = 4: SubWord; lalu XOR W[i−8].</div>
+              </div>
+              <div class="py-1.5 text-center text-slate-500" aria-hidden="true">↓</div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 font-mono">
+                <div v-for="(roundKey, round) in roundKeys" :key="round" class="min-w-0 rounded border border-slate-800 bg-slate-950/80 px-2 py-1">
+                  <div class="text-[9px] text-slate-500">K{{ round }} · W{{ round * 4 }}–W{{ round * 4 + 3 }}</div>
+                  <div class="break-all text-[9px] leading-relaxed text-emerald-300">{{ formatKey(roundKey) }}</div>
+                </div>
+              </div>
+            </section>
           </div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-1.5 font-mono">
-            <div v-for="(roundKey, round) in roundKeys" :key="round" class="rounded border border-slate-800 bg-slate-900/80 px-2 py-1.5">
-              <div class="text-[10px] text-slate-500">Round {{ round }} · W{{ round * 4 }}–W{{ round * 4 + 3 }}</div>
-              <div class="break-all text-[10px] text-emerald-300">{{ formatKey(roundKey) }}</div>
-            </div>
-          </div>
+
           <p class="text-[10px] text-amber-400/80">
-            Materi kunci ditampilkan untuk pembelajaran di browser ini. Operasi enkripsi/dekripsi sebenarnya tetap dijalankan oleh Web Crypto API.
+            Diagram menjelaskan tahapan algoritma; enkripsi/dekripsi aktual tetap dijalankan oleh Web Crypto API. Round key tidak dikirim ke server.
           </p>
         </div>
       </details>
