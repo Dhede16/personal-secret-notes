@@ -140,6 +140,38 @@
         </div>
       </div>
 
+      <!-- AES-256 key schedule -->
+      <details v-if="keyString" open class="mb-4 bg-slate-950/80 border border-amber-500/30 rounded-xl p-3 text-xs">
+        <summary class="cursor-pointer font-bold text-amber-300">
+          Tahap Key Expansion AES-256 · 256-bit menjadi 15 Round Key
+        </summary>
+        <div class="mt-3 space-y-3">
+          <p class="text-[11px] leading-relaxed text-slate-400">
+            Passphrase di-hash dengan SHA-256 menjadi K0 (8 word / 32 byte). Ekspansi membentuk W0–W59: setiap 8 word memakai RotWord, SubWord, dan Rcon; word ke-4 memakai SubWord; hasilnya di-XOR dengan word ke-8 sebelumnya.
+          </p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
+            <div class="rounded-lg border border-slate-800 bg-slate-900 p-2">
+              <div class="text-[10px] text-slate-500 mb-1">SHA-256(PASSPHRASE) · KUNCI AWAL</div>
+              <div class="break-all text-amber-200">{{ derivedKeyHex || 'Menghitung...' }}</div>
+            </div>
+            <div class="rounded-lg border border-slate-800 bg-slate-900 p-2">
+              <div class="text-[10px] text-slate-500 mb-1">TRANSFORMASI KUNCI</div>
+              <div class="text-cyan-200">RotWord → SubWord → XOR Rcon → XOR W[i−8]</div>
+              <div class="mt-1 text-slate-400">AES-256 juga memakai SubWord saat i mod 8 = 4.</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-1.5 font-mono">
+            <div v-for="(roundKey, round) in roundKeys" :key="round" class="rounded border border-slate-800 bg-slate-900/80 px-2 py-1.5">
+              <div class="text-[10px] text-slate-500">Round {{ round }} · W{{ round * 4 }}–W{{ round * 4 + 3 }}</div>
+              <div class="break-all text-[10px] text-emerald-300">{{ formatKey(roundKey) }}</div>
+            </div>
+          </div>
+          <p class="text-[10px] text-amber-400/80">
+            Materi kunci ditampilkan untuk pembelajaran di browser ini. Operasi enkripsi/dekripsi sebenarnya tetap dijalankan oleh Web Crypto API.
+          </p>
+        </div>
+      </details>
+
       <!-- Main Interactive Block Pipeline -->
       <div class="space-y-4">
         <!-- Top Card: Source Data Stream Overview -->
@@ -488,7 +520,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { byteToHex, splitIntoBlocks, parseEncryptedPayload, base64ToBuffer, useCrypto } from '../composables/useCrypto';
+import { byteToHex, splitIntoBlocks, parseEncryptedPayload, deriveKeyBytes, expandAes256Key } from '../composables/useCrypto';
 
 const props = defineProps({
   mode: {
@@ -498,6 +530,10 @@ const props = defineProps({
   plaintext: {
     type: String,
     default: 'Hello World, this is my secret note',
+  },
+  keyString: {
+    type: String,
+    default: '',
   },
   ciphertext: {
     type: String,
@@ -542,6 +578,9 @@ let timer = null;
 const blocks = ref([]);
 const plainBytesLength = ref(0);
 const cipherBytesLength = ref(0);
+const derivedKeyHex = ref('');
+const roundKeys = ref([]);
+let keyScheduleRequest = 0;
 
 const totalBlocks = computed(() => blocks.value.length || 1);
 const currentBlock = computed(() => blocks.value[activeBlockIndex.value] || null);
@@ -556,6 +595,24 @@ function formatCharDisplay(byte) {
   if (byte === 32) return '_'; // visually show space as requested in section 1
   if (byte >= 33 && byte <= 126) return String.fromCharCode(byte);
   return '·';
+}
+
+function formatKey(bytes) {
+  return Array.from(bytes, byteToHex).join(' ');
+}
+
+async function updateKeySchedule() {
+  const request = ++keyScheduleRequest;
+  if (!props.keyString) {
+    derivedKeyHex.value = '';
+    roundKeys.value = [];
+    return;
+  }
+
+  const keyBytes = await deriveKeyBytes(props.keyString);
+  if (request !== keyScheduleRequest) return;
+  derivedKeyHex.value = formatKey(keyBytes);
+  roundKeys.value = expandAes256Key(keyBytes);
 }
 
 function initBlocks() {
@@ -712,10 +769,13 @@ watch(() => props.ciphertext, () => {
   initBlocks();
 });
 
+watch(() => props.keyString, updateKeySchedule);
+
 onMounted(() => {
   if (!props.isEmbedded) {
     window.addEventListener('keydown', handleKeydown);
   }
+  updateKeySchedule();
   initBlocks();
 });
 

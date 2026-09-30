@@ -106,6 +106,7 @@
           :key="recomputeTrigger"
           :mode="activeMode"
           :plaintext="inputPlaintext"
+          :key-string="inputKey"
           :ciphertext="computedCiphertext"
           :iv="computedIv"
           :is-embedded="true"

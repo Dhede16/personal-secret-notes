@@ -3,6 +3,7 @@
     mode="decrypt"
     :ciphertext="ciphertext"
     :plaintext="plaintext"
+    :key-string="keyString"
     :iv="iv"
     :is-failed="isFailed"
     @complete="$emit('complete')"
@@ -14,6 +15,10 @@ import CryptoBlockVisualizer from './CryptoBlockVisualizer.vue';
 
 defineProps({
   ciphertext: {
+    type: String,
+    required: true,
+  },
+  keyString: {
     type: String,
     required: true,
   },

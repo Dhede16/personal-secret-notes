@@ -157,6 +157,7 @@
     <EncryptionAnimation
       v-if="encryptionAnim"
       :plaintext="encryptionAnim.plaintext"
+      :key-string="encryptionAnim.keyString"
       :ciphertext="encryptionAnim.ciphertext"
       :iv="encryptionAnim.iv"
       @complete="onEncryptionAnimComplete"
@@ -167,6 +168,7 @@
       v-if="decryptionAnim"
       :ciphertext="decryptionAnim.ciphertext"
       :plaintext="decryptionAnim.plaintext"
+      :key-string="decryptionAnim.keyString"
       :iv="decryptionAnim.iv"
       :is-failed="decryptionAnim.isFailed"
       @complete="onDecryptionAnimComplete"
@@ -301,6 +303,7 @@ async function handleSaveNote({ id, title, content, key }) {
 
     encryptionAnim.value = {
       plaintext: content,
+      keyString: key,
       ciphertext: ciphertext,
       iv: iv,
     };
@@ -370,6 +373,7 @@ async function handleKeySubmit(key) {
     decryptionAnim.value = {
       ciphertext: targetNote.ciphertext,
       plaintext: decrypted,
+      keyString: key,
       iv: targetNote.iv,
       isFailed: false,
     };
@@ -388,6 +392,7 @@ async function handleKeySubmit(key) {
     decryptionAnim.value = {
       ciphertext: targetNote.ciphertext,
       plaintext: scrambled,
+      keyString: key,
       iv: targetNote.iv,
       isFailed: true,
     };

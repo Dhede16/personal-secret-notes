@@ -25,12 +25,89 @@ export function base64ToBuffer(base64) {
 }
 
 /**
- * Derives a 256-bit AES-GCM CryptoKey from user input string using SHA-256
+ * Derives the 256-bit raw key used by AES-GCM from the passphrase using SHA-256.
  */
-async function deriveKey(keyString) {
+export async function deriveKeyBytes(keyString) {
   const encoder = new TextEncoder();
   const keyBytes = encoder.encode(keyString);
   const hash = await crypto.subtle.digest('SHA-256', keyBytes);
+  return new Uint8Array(hash);
+}
+
+/**
+ * Expands a 256-bit AES key into its 15 round keys (AES-256 key schedule).
+ */
+export function expandAes256Key(keyBytes) {
+  if (!(keyBytes instanceof Uint8Array) || keyBytes.length !== 32) {
+    throw new Error('AES-256 key must contain exactly 32 bytes.');
+  }
+
+  function multiplyInField(left, right) {
+    let product = 0;
+    for (let bit = 0; bit < 8; bit++) {
+      if (right & 1) product ^= left;
+      const highBit = left & 0x80;
+      left = (left << 1) & 0xff;
+      if (highBit) left ^= 0x1b;
+      right >>= 1;
+    }
+    return product;
+  }
+
+  function rotateByteLeft(value, shift) {
+    return ((value << shift) | (value >> (8 - shift))) & 0xff;
+  }
+
+  function substituteByte(value) {
+    let inverse = 0;
+    if (value !== 0) {
+      let base = value;
+      let exponent = 254;
+      inverse = 1;
+      while (exponent > 0) {
+        if (exponent & 1) inverse = multiplyInField(inverse, base);
+        base = multiplyInField(base, base);
+        exponent >>= 1;
+      }
+    }
+    return inverse ^ rotateByteLeft(inverse, 1) ^ rotateByteLeft(inverse, 2)
+      ^ rotateByteLeft(inverse, 3) ^ rotateByteLeft(inverse, 4) ^ 0x63;
+  }
+
+  const expanded = new Uint8Array(240);
+  expanded.set(keyBytes);
+  let roundConstant = 1;
+
+  for (let word = 8; word < 60; word++) {
+    const offset = word * 4;
+    const previous = expanded.slice(offset - 4, offset);
+
+    if (word % 8 === 0) {
+      const first = previous[0];
+      previous[0] = substituteByte(previous[1]) ^ roundConstant;
+      previous[1] = substituteByte(previous[2]);
+      previous[2] = substituteByte(previous[3]);
+      previous[3] = substituteByte(first);
+      roundConstant = multiplyInField(roundConstant, 2);
+    } else if (word % 8 === 4) {
+      for (let index = 0; index < 4; index++) {
+        previous[index] = substituteByte(previous[index]);
+      }
+    }
+
+    for (let index = 0; index < 4; index++) {
+      expanded[offset + index] = expanded[offset - 32 + index] ^ previous[index];
+    }
+  }
+
+  return Array.from({ length: 15 }, (_, round) => expanded.slice(round * 16, (round + 1) * 16));
+}
+
+/**
+ * Derives a 256-bit AES-GCM CryptoKey from user input string using SHA-256
+ */
+async function deriveKey(keyString) {
+  const hash = await deriveKeyBytes(keyString);
   return crypto.subtle.importKey(
     'raw',
     hash,

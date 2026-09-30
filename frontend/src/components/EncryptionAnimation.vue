@@ -2,6 +2,7 @@
   <CryptoBlockVisualizer
     mode="encrypt"
     :plaintext="plaintext"
+    :key-string="keyString"
     :ciphertext="ciphertext"
     :iv="iv"
     :is-failed="false"
@@ -14,6 +15,10 @@ import CryptoBlockVisualizer from './CryptoBlockVisualizer.vue';
 
 defineProps({
   plaintext: {
+    type: String,
+    required: true,
+  },
+  keyString: {
     type: String,
     required: true,
   },
