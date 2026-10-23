@@ -128,17 +128,271 @@
         <!-- Block Progress Indicator -->
         <div class="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
           <span class="font-mono text-slate-300 font-semibold">
-            Blok {{ activeBlockIndex + 1 }} / {{ totalBlocks }}
+            {{ phase === 'keyExpansion'
+              ? `Ekspansi Kunci ${activeRound + 1} / ${roundKeys.length}`
+              : phase === 'rounds'
+              ? `AES Round ${activeAesRound} / 14`
+              : `Blok ${activeBlockIndex + 1} / ${totalBlocks}` }}
           </span>
           <div class="w-24 bg-slate-800 h-2 rounded-full overflow-hidden">
             <div
               class="h-full bg-gradient-to-r transition-all duration-300"
-              :class="currentMode === 'encrypt' ? 'from-emerald-500 to-teal-400' : 'from-indigo-500 to-cyan-400'"
-              :style="{ width: `${progressPercent}%` }"
+              :class="phase === 'keyExpansion' || phase === 'rounds' ? 'from-violet-500 to-fuchsia-400' : currentMode === 'encrypt' ? 'from-emerald-500 to-teal-400' : 'from-indigo-500 to-cyan-400'"
+              :style="{ width: `${phaseProgressPercent}%` }"
             ></div>
           </div>
         </div>
       </div>
+
+      <!-- AES-256 Key Expansion -->
+      <section class="mb-4 rounded-2xl border border-violet-500/25 bg-violet-950/15 p-4">
+        <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-violet-300">
+              1. Key Expansion AES-256
+            </h4>
+            <p class="mt-1 text-[11px] text-slate-400">
+              Password di-hash dengan SHA-256 menjadi kunci 256-bit, lalu diperluas menjadi 15 round key sebelum transformasi blok.
+            </p>
+          </div>
+          <span class="shrink-0 rounded-full border border-violet-500/30 bg-violet-950/60 px-2 py-1 text-[10px] font-semibold text-violet-300">
+            {{ roundKeys.length ? `${roundKeys.length} Round Key • 60 Word` : 'Menunggu kunci' }}
+          </span>
+        </div>
+
+        <div v-if="keyExpansionError" class="rounded-lg border border-rose-500/30 bg-rose-950/30 p-3 text-xs text-rose-300" role="alert">
+          {{ keyExpansionError }}
+        </div>
+        <div v-else-if="roundKeys.length" class="space-y-2">
+          <div class="rounded-lg border border-slate-800 bg-slate-950/70 p-2.5">
+            <div class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Kunci awal hasil SHA-256 (K0)
+            </div>
+            <div class="break-all font-mono text-[11px] leading-relaxed text-violet-200">
+              {{ keyBytesHex }}
+            </div>
+          </div>
+
+          <div class="max-h-64 space-y-1 overflow-y-auto pr-1" aria-label="AES-256 round keys">
+            <button
+              v-for="(roundKey, roundIndex) in roundKeys"
+              :key="roundIndex"
+              type="button"
+              @click="selectedKeyRound = roundIndex"
+              :aria-pressed="selectedKeyRound === roundIndex"
+              class="grid grid-cols-[auto_1fr] items-center gap-2 rounded-lg border p-2 transition-colors sm:grid-cols-[5rem_1fr]"
+              :class="selectedKeyRound === roundIndex
+                ? 'border-violet-400/60 bg-violet-950/40 ring-1 ring-violet-400/20'
+                : roundIndex < activeRound || phase !== 'keyExpansion'
+                ? 'border-emerald-500/20 bg-emerald-950/10'
+                : 'border-slate-800 bg-slate-950/50'"
+            >
+              <div class="flex items-center gap-1.5 text-[10px] font-bold text-slate-300">
+                <span>{{ `R${roundIndex}` }}</span>
+                <span v-if="roundIndex < activeRound || phase === 'blocks'" class="text-emerald-400">✓</span>
+                <span v-else-if="roundIndex === activeRound && phase === 'keyExpansion'" class="text-violet-300">●</span>
+              </div>
+              <div class="grid grid-cols-2 gap-1 sm:grid-cols-4">
+                <span
+                  v-for="(word, wordIndex) in roundKeyWords(roundKey)"
+                  :key="wordIndex"
+                  class="break-all rounded bg-slate-950/70 px-1.5 py-1 text-center font-mono text-[10px] text-slate-300"
+                >
+                  {{ word }}
+                </span>
+              </div>
+            </button>
+          </div>
+
+          <div v-if="selectedKeyWordSteps.length" class="rounded-xl border border-violet-500/20 bg-slate-950/60 p-3">
+            <div class="mb-3">
+              <h5 class="text-xs font-bold text-violet-200">
+                Detail pembentukan Round Key {{ selectedKeyRound }}
+              </h5>
+              <p class="mt-1 text-[10px] leading-relaxed text-slate-400">
+                {{ selectedKeyRound < 2
+                  ? 'Round key ini mengambil word langsung dari kunci 256-bit hasil SHA-256.'
+                  : 'Setiap word baru dihitung dari word 8 posisi sebelumnya XOR hasil transformasi word sebelumnya.' }}
+              </p>
+            </div>
+
+            <div class="grid grid-cols-1 gap-2 xl:grid-cols-2">
+              <article
+                v-for="wordStep in selectedKeyWordSteps"
+                :key="wordStep.index"
+                class="rounded-lg border border-slate-800 bg-slate-900/70 p-2.5"
+              >
+                <div class="mb-2 flex items-center justify-between">
+                  <h6 class="font-mono text-[11px] font-bold text-slate-200">
+                    {{ `w[${wordStep.index}]` }}
+                  </h6>
+                  <span class="text-[9px] uppercase tracking-wide text-slate-500">
+                    {{ wordStep.initial ? 'Kunci awal' : 'Word hasil ekspansi' }}
+                  </span>
+                </div>
+                <div v-if="wordStep.initial" class="space-y-1 text-[10px]">
+                  <div class="text-slate-400">Diambil langsung dari kunci hasil SHA-256:</div>
+                  <div class="break-all rounded bg-slate-950 px-2 py-1 font-mono text-violet-200">
+                    {{ formatWord(wordStep.resultWord) }}
+                  </div>
+                </div>
+                <div v-else class="space-y-1 text-[10px]">
+                  <div class="grid grid-cols-[6rem_1fr] gap-2 text-slate-400">
+                    <span>{{ `w[${wordStep.index - 8}]` }}</span>
+                    <span class="break-all font-mono text-slate-300">{{ formatWord(wordStep.baseWord) }}</span>
+                  </div>
+                  <div class="grid grid-cols-[6rem_1fr] gap-2 text-slate-400">
+                    <span>{{ `w[${wordStep.index - 1}]` }}</span>
+                    <span class="break-all font-mono text-slate-300">{{ formatWord(wordStep.previousWord) }}</span>
+                  </div>
+                  <div v-if="wordStep.rotatedWord" class="grid grid-cols-[6rem_1fr] gap-2 text-slate-400">
+                    <span>RotWord</span>
+                    <span class="break-all font-mono text-cyan-200">{{ formatWord(wordStep.rotatedWord) }}</span>
+                  </div>
+                  <div v-if="wordStep.substitutedWord" class="grid grid-cols-[6rem_1fr] gap-2 text-slate-400">
+                    <span>SubWord</span>
+                    <span class="break-all font-mono text-cyan-200">{{ formatWord(wordStep.substitutedWord) }}</span>
+                  </div>
+                  <div v-if="wordStep.rconValue !== null" class="grid grid-cols-[6rem_1fr] gap-2 text-slate-400">
+                    <span>{{ `XOR Rcon ${byteToHex(wordStep.rconValue)}` }}</span>
+                    <span class="break-all font-mono text-cyan-200">{{ formatWord(wordStep.tempWord) }}</span>
+                  </div>
+                  <div class="grid grid-cols-[6rem_1fr] gap-2 text-slate-400">
+                    <span>temp</span>
+                    <span class="break-all font-mono text-violet-200">{{ formatWord(wordStep.tempWord) }}</span>
+                  </div>
+                  <div class="grid grid-cols-[6rem_1fr] gap-2 border-t border-slate-800 pt-1 text-slate-400">
+                    <span>{{ `XOR → w[${wordStep.index}]` }}</span>
+                    <span class="break-all font-mono font-bold text-emerald-300">{{ formatWord(wordStep.resultWord) }}</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <p class="text-[10px] text-slate-500">
+            AES-256: RotWord + SubWord + Rcon membentuk word baru; tiap round key terdiri dari 4 word (128-bit).
+          </p>
+        </div>
+        <p v-else class="rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-500">
+          Kunci belum tersedia; tahap ekspansi akan dimulai setelah kunci diberikan.
+        </p>
+      </section>
+
+      <!-- AES-256 Round Operations -->
+      <section class="mb-4 rounded-2xl border border-cyan-500/25 bg-cyan-950/10 p-4">
+        <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-cyan-300">
+              2. Tahapan Round AES-256
+            </h4>
+            <p class="mt-1 max-w-3xl text-[11px] leading-relaxed text-slate-400">
+              AES-GCM menggunakan AES-CTR: yang masuk ke round AES adalah blok counter (Nonce || counter), bukan plaintext secara langsung.
+              Round 0 melakukan AddRoundKey; round 1–13 melakukan SubBytes, ShiftRows, MixColumns, AddRoundKey; round 14 tanpa MixColumns.
+              Enkripsi dan dekripsi sama-sama memakai AES forward rounds, lalu hasilnya di-XOR dengan data.
+            </p>
+          </div>
+          <span v-if="roundTrace.length" class="shrink-0 rounded-full border border-cyan-500/30 bg-cyan-950/50 px-2 py-1 text-[10px] font-semibold text-cyan-300">
+            {{ currentBlock?.isAuthTag ? 'Counter tag (J₀)' : `Counter blok ${activeBlockIndex + 1}` }}
+          </span>
+        </div>
+
+        <div v-if="roundTraceError" class="rounded-lg border border-amber-500/30 bg-amber-950/20 p-3 text-xs text-amber-200" role="status">
+          {{ roundTraceError }}
+        </div>
+        <template v-else-if="roundTrace.length">
+          <div class="mb-3 rounded-lg border border-slate-800 bg-slate-950/70 p-2.5">
+            <div class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Input AES untuk blok counter
+            </div>
+            <div class="break-all font-mono text-[11px] leading-relaxed text-cyan-200">
+              {{ counterBlockHex }}
+            </div>
+          </div>
+
+          <div class="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1" aria-label="Pilih round AES">
+            <button
+              v-for="round in roundTrace"
+              :key="round.round"
+              type="button"
+              @click="activeAesRound = round.round"
+              :aria-pressed="activeAesRound === round.round"
+              class="shrink-0 rounded-lg border px-2.5 py-1.5 font-mono text-xs transition-colors"
+              :class="activeAesRound === round.round
+                ? 'border-cyan-400 bg-cyan-600 text-white'
+                : round.round < activeAesRound
+                ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-300'
+                : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'"
+            >
+              R{{ round.round }}
+            </button>
+          </div>
+
+          <div v-if="activeRoundTrace" class="rounded-xl border border-cyan-500/20 bg-slate-950/60 p-3">
+            <div class="mb-3 flex items-center justify-between gap-2">
+              <h5 class="text-xs font-bold text-cyan-200">
+                Round {{ activeRoundTrace.round }}
+                <span class="font-normal text-slate-400">
+                  {{ activeRoundTrace.round === 0 ? '• initial AddRoundKey' : activeRoundTrace.round === 14 ? '• final round' : '• main round' }}
+                </span>
+              </h5>
+              <span v-if="phase === 'rounds' && activeAesRound === activeRoundTrace.round" class="text-[10px] font-semibold text-violet-300">
+                Sedang divisualisasikan
+              </span>
+            </div>
+
+            <div class="grid grid-cols-1 gap-2 lg:grid-cols-2">
+              <article
+                v-for="step in activeRoundTrace.steps"
+                :key="step.name"
+                class="rounded-lg border border-slate-800 bg-slate-900/70 p-2.5"
+              >
+                <div class="mb-2 flex items-center justify-between">
+                  <h6 class="text-[11px] font-bold text-slate-200">{{ step.name }}</h6>
+                  <span class="text-[9px] uppercase tracking-wide text-slate-500">Hasil tahap • state 4 × 4</span>
+                </div>
+                <p class="mb-2 text-[10px] leading-relaxed text-slate-400">
+                  {{ step.name.includes('AddRoundKey')
+                    ? 'XOR setiap byte state dengan byte pada round key yang sesuai.'
+                    : step.name === 'SubBytes'
+                    ? 'Ganti setiap byte dengan nilainya pada AES S-Box.'
+                    : step.name === 'ShiftRows'
+                    ? 'Geser baris state ke kiri: 0, 1, 2, lalu 3 posisi.'
+                    : 'Campur setiap kolom dengan perkalian matriks di GF(2⁸).' }}
+                </p>
+                <div v-if="step.name.includes('AddRoundKey')" class="mb-2 rounded bg-slate-950/80 p-2">
+                  <div class="mb-1 text-[9px] font-semibold uppercase tracking-wide text-violet-300">
+                    Round key K{{ activeRoundTrace.round }} (operand XOR)
+                  </div>
+                  <div class="grid grid-cols-4 gap-1">
+                    <span
+                      v-for="(keyByte, keyIndex) in roundKeys[activeRoundTrace.round]"
+                      :key="keyIndex"
+                      class="rounded bg-slate-900 px-1 py-1 text-center font-mono text-[9px] text-violet-200"
+                    >
+                      {{ byteToHex(keyByte) }}
+                    </span>
+                  </div>
+                </div>
+                <div class="grid max-w-xs grid-cols-4 gap-1" :aria-label="`${step.name} output matrix`">
+                  <template v-for="row in 4" :key="row">
+                    <span
+                      v-for="column in 4"
+                      :key="`${row}-${column}`"
+                      class="rounded border border-slate-700/80 bg-slate-950 px-1 py-1.5 text-center font-mono text-[10px] text-cyan-200"
+                    >
+                      {{ byteToHex(step.state[(row - 1) + (column - 1) * 4]) }}
+                    </span>
+                  </template>
+                </div>
+              </article>
+            </div>
+          </div>
+        </template>
+        <p v-else class="rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-500">
+          Round AES akan ditampilkan setelah key dan IV tersedia.
+        </p>
+      </section>
 
       <!-- Main Interactive Block Pipeline -->
       <div class="space-y-4">
@@ -146,7 +400,7 @@
         <div class="bg-slate-950/80 border border-slate-800/80 rounded-xl p-3">
           <div class="flex items-center justify-between text-xs mb-1.5">
             <span class="text-slate-400 font-semibold uppercase tracking-wider">
-              {{ currentMode === 'encrypt' ? '1. Plaintext Input (Teks Asli)' : '1. Ciphertext Payload & Nonce' }}
+              {{ currentMode === 'encrypt' ? '2. Plaintext Input (Teks Asli)' : '2. Ciphertext Payload & Nonce' }}
             </span>
             <span class="font-mono text-[11px] text-slate-500">
               {{ currentMode === 'encrypt' ? `${plainBytesLength} Byte • ${blocks.length} Blok (16B/blok)` : `${cipherBytesLength} Byte Data + 16B Auth Tag` }}
@@ -200,7 +454,7 @@
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
               <span class="text-xs font-bold uppercase tracking-wider text-indigo-300">
-                {{ currentBlock.isAuthTag ? 'Authentication Tag (GMAC)' : `Transformasi Blok ${activeBlockIndex + 1} / ${blocks.length}` }}
+                {{ currentBlock.isAuthTag ? 'Authentication Tag (GMAC)' : `3. Transformasi Blok ${activeBlockIndex + 1} / ${blocks.length}` }}
               </span>
               <span
                 class="text-[10px] font-mono px-2 py-0.5 rounded-full border uppercase"
@@ -459,7 +713,13 @@
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
             </svg>
-            <span>Memproses blok kriptografi {{ activeBlockIndex + 1 }} dari {{ totalBlocks }}...</span>
+            <span>
+              {{ phase === 'keyExpansion'
+                ? `Memperluas kunci AES-256 (round ${activeRound + 1} dari ${roundKeys.length})...`
+                : phase === 'rounds'
+                ? `Menjalankan AES forward round ${activeAesRound} dari 14...`
+                : `Memproses blok kriptografi ${activeBlockIndex + 1} dari ${totalBlocks}...` }}
+            </span>
           </div>
         </div>
 
@@ -488,7 +748,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { byteToHex, splitIntoBlocks, parseEncryptedPayload, base64ToBuffer, useCrypto } from '../composables/useCrypto';
+import { byteToHex, splitIntoBlocks, parseEncryptedPayload, base64ToBuffer, useCrypto, getAes256KeySchedule, createAes256EncryptionTrace } from '../composables/useCrypto';
 
 const props = defineProps({
   mode: {
@@ -504,6 +764,10 @@ const props = defineProps({
     default: '',
   },
   iv: {
+    type: String,
+    default: '',
+  },
+  keyString: {
     type: String,
     default: '',
   },
@@ -528,6 +792,13 @@ const isPlaying = ref(true);
 const isCompleted = ref(false);
 const activeBlockIndex = ref(0);
 const speedMs = ref(800); // default speed
+const phase = ref('keyExpansion');
+const activeRound = ref(0);
+const activeAesRound = ref(0);
+const roundKeys = ref([]);
+const wordSteps = ref([]);
+const keyBytesHex = ref('');
+const keyExpansionError = ref('');
 
 const speedOptions = [
   { label: '0.5x', ms: 1400 },
@@ -537,6 +808,7 @@ const speedOptions = [
 ];
 
 let timer = null;
+let initToken = 0;
 
 // Block models
 const blocks = ref([]);
@@ -545,11 +817,70 @@ const cipherBytesLength = ref(0);
 
 const totalBlocks = computed(() => blocks.value.length || 1);
 const currentBlock = computed(() => blocks.value[activeBlockIndex.value] || null);
-const progressPercent = computed(() => {
+const selectedKeyRound = ref(0);
+const selectedKeyWordSteps = computed(() =>
+  wordSteps.value.slice(selectedKeyRound.value * 4, selectedKeyRound.value * 4 + 4)
+);
+const roundTraceState = computed(() => {
+  if (!roundKeys.value.length || !props.iv || !currentBlock.value) {
+    return { trace: [], error: '', counterBlockHex: '' };
+  }
+
+  try {
+    const ivBytes = new Uint8Array(base64ToBuffer(props.iv));
+    if (ivBytes.length !== 12) {
+      return {
+        trace: [],
+        error: 'IV AES-GCM harus berukuran 12 byte agar counter dapat divisualisasikan.',
+        counterBlockHex: '',
+      };
+    }
+
+    const counterBlock = new Uint8Array(16);
+    counterBlock.set(ivBytes);
+    const isTagBlock = currentBlock.value.isAuthTag;
+    const counterValue = isTagBlock || cipherBytesLength.value === 0
+      ? 1
+      : currentBlock.value.index + 2;
+    new DataView(counterBlock.buffer).setUint32(12, counterValue, false);
+    return {
+      trace: createAes256EncryptionTrace(counterBlock, roundKeys.value),
+      error: '',
+      counterBlockHex: Array.from(counterBlock, byteToHex).join(''),
+    };
+  } catch (error) {
+    return {
+      trace: [],
+      error: 'Trace round AES tidak dapat dihitung dari IV dan kunci yang tersedia.',
+      counterBlockHex: '',
+    };
+  }
+});
+const roundTrace = computed(() => roundTraceState.value.trace);
+const roundTraceError = computed(() => roundTraceState.value.error);
+const counterBlockHex = computed(() => roundTraceState.value.counterBlockHex);
+const activeRoundTrace = computed(() => roundTrace.value[activeAesRound.value] || null);
+const phaseProgressPercent = computed(() => {
+  if (phase.value === 'keyExpansion' && roundKeys.value.length > 0) {
+    return Math.min(100, Math.round(((activeRound.value + 1) / roundKeys.value.length) * 100));
+  }
+  if (phase.value === 'rounds') {
+    return Math.min(100, Math.round(((activeAesRound.value + 1) / 15) * 100));
+  }
   if (totalBlocks.value === 0) return 0;
   const completedCount = blocks.value.filter((b) => b.status === 'completed').length;
   return Math.min(100, Math.round((completedCount / totalBlocks.value) * 100));
 });
+
+function roundKeyWords(roundKey) {
+  return Array.from({ length: 4 }, (_, index) =>
+    roundKey.slice(index * 4, index * 4 + 4).map(byteToHex).join('')
+  );
+}
+
+function formatWord(word) {
+  return word.map(byteToHex).join('');
+}
 
 // Format characters for clear display (spaces as '_' in visual representation, unprintable as '.')
 function formatCharDisplay(byte) {
@@ -558,8 +889,9 @@ function formatCharDisplay(byte) {
   return '·';
 }
 
-function initBlocks() {
+async function initBlocks() {
   clearTimeout(timer);
+  const currentInitToken = ++initToken;
   const encoder = new TextEncoder();
   const rawPlainBytes = encoder.encode(props.plaintext || '');
   plainBytesLength.value = rawPlainBytes.length;
@@ -611,6 +943,29 @@ function initBlocks() {
   activeBlockIndex.value = 0;
   isCompleted.value = false;
   isPlaying.value = true;
+  phase.value = 'keyExpansion';
+  activeRound.value = 0;
+  selectedKeyRound.value = 0;
+  activeAesRound.value = 0;
+  roundKeys.value = [];
+  wordSteps.value = [];
+  keyBytesHex.value = '';
+  keyExpansionError.value = '';
+
+  if (props.keyString) {
+    try {
+      const schedule = await getAes256KeySchedule(props.keyString);
+      if (currentInitToken !== initToken) return;
+      roundKeys.value = schedule.roundKeys;
+      wordSteps.value = schedule.wordSteps;
+      keyBytesHex.value = Array.from(schedule.keyBytes, byteToHex).join('');
+    } catch (error) {
+      if (currentInitToken !== initToken) return;
+      keyExpansionError.value = 'Key expansion gagal dihitung oleh browser. Coba mulai ulang visualisasi.';
+      isPlaying.value = false;
+      return;
+    }
+  }
 
   // Check prefers-reduced-motion
   if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -619,7 +974,52 @@ function initBlocks() {
     return;
   }
 
-  runStep();
+  if (roundKeys.value.length > 0) {
+    runKeyExpansionStep();
+  } else {
+    phase.value = 'blocks';
+    runStep();
+  }
+}
+
+function runKeyExpansionStep() {
+  clearTimeout(timer);
+  if (!isPlaying.value) return;
+
+  const idx = activeRound.value;
+  timer = setTimeout(() => {
+    if (!isPlaying.value) return;
+    if (idx + 1 < roundKeys.value.length) {
+      activeRound.value = idx + 1;
+      selectedKeyRound.value = activeRound.value;
+      timer = setTimeout(runKeyExpansionStep, Math.max(80, speedMs.value * 0.15));
+    } else {
+      if (roundTrace.value.length) {
+        phase.value = 'rounds';
+        activeAesRound.value = 0;
+        runAesRoundStep();
+      } else {
+        phase.value = 'blocks';
+        runStep();
+      }
+    }
+  }, Math.max(120, speedMs.value * 0.5));
+}
+
+function runAesRoundStep() {
+  clearTimeout(timer);
+  if (!isPlaying.value) return;
+
+  timer = setTimeout(() => {
+    if (!isPlaying.value) return;
+    if (activeAesRound.value < 14) {
+      activeAesRound.value++;
+      timer = setTimeout(runAesRoundStep, Math.max(80, speedMs.value * 0.15));
+    } else {
+      phase.value = 'blocks';
+      runStep();
+    }
+  }, Math.max(120, speedMs.value * 35 / 100));
 }
 
 function runStep() {
@@ -648,7 +1048,13 @@ function runStep() {
 
       if (idx + 1 < blocks.value.length) {
         activeBlockIndex.value = idx + 1;
-        timer = setTimeout(runStep, Math.max(80, speedMs.value * 0.2));
+        activeAesRound.value = 0;
+        if (roundTrace.value.length) {
+          phase.value = 'rounds';
+          timer = setTimeout(runAesRoundStep, Math.max(80, speedMs.value * 0.2));
+        } else {
+          timer = setTimeout(runStep, Math.max(80, speedMs.value * 0.2));
+        }
       } else {
         isCompleted.value = true;
         isPlaying.value = false;
@@ -664,7 +1070,13 @@ function togglePlay() {
   }
   isPlaying.value = !isPlaying.value;
   if (isPlaying.value) {
-    runStep();
+    if (phase.value === 'keyExpansion') {
+      runKeyExpansionStep();
+    } else if (phase.value === 'rounds') {
+      runAesRoundStep();
+    } else {
+      runStep();
+    }
   } else {
     clearTimeout(timer);
   }
@@ -680,6 +1092,9 @@ function selectBlock(idx) {
 
 function completeAllBlocks() {
   clearTimeout(timer);
+  phase.value = 'blocks';
+  activeRound.value = roundKeys.value.length;
+  activeAesRound.value = 14;
   blocks.value.forEach((b) => {
     b.status = 'completed';
   });
@@ -708,7 +1123,7 @@ function handleKeydown(e) {
   }
 }
 
-watch(() => props.ciphertext, () => {
+watch(() => [props.ciphertext, props.keyString, props.iv], () => {
   initBlocks();
 });
 
