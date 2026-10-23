@@ -108,6 +108,7 @@
           :plaintext="inputPlaintext"
           :ciphertext="computedCiphertext"
           :iv="computedIv"
+          :key-string="inputKey"
           :is-embedded="true"
           @complete="onComplete"
           @close="$emit('close')"

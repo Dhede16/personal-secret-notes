@@ -159,6 +159,7 @@
       :plaintext="encryptionAnim.plaintext"
       :ciphertext="encryptionAnim.ciphertext"
       :iv="encryptionAnim.iv"
+      :key-string="encryptionAnim.keyString"
       @complete="onEncryptionAnimComplete"
     />
 
@@ -168,6 +169,7 @@
       :ciphertext="decryptionAnim.ciphertext"
       :plaintext="decryptionAnim.plaintext"
       :iv="decryptionAnim.iv"
+      :key-string="decryptionAnim.keyString"
       :is-failed="decryptionAnim.isFailed"
       @complete="onDecryptionAnimComplete"
     />
@@ -303,6 +305,7 @@ async function handleSaveNote({ id, title, content, key }) {
       plaintext: content,
       ciphertext: ciphertext,
       iv: iv,
+      keyString: key,
     };
   } catch (err) {
     alert(err.message || 'Encryption failed.');
@@ -371,6 +374,7 @@ async function handleKeySubmit(key) {
       ciphertext: targetNote.ciphertext,
       plaintext: decrypted,
       iv: targetNote.iv,
+      keyString: key,
       isFailed: false,
     };
   } catch (err) {
@@ -389,6 +393,7 @@ async function handleKeySubmit(key) {
       ciphertext: targetNote.ciphertext,
       plaintext: scrambled,
       iv: targetNote.iv,
+      keyString: key,
       isFailed: true,
     };
   } finally {

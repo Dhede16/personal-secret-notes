@@ -4,6 +4,7 @@
     :plaintext="plaintext"
     :ciphertext="ciphertext"
     :iv="iv"
+    :key-string="keyString"
     :is-failed="false"
     @complete="$emit('complete')"
   />
@@ -22,6 +23,10 @@ defineProps({
     required: true,
   },
   iv: {
+    type: String,
+    default: '',
+  },
+  keyString: {
     type: String,
     default: '',
   },
