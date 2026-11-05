@@ -5,6 +5,7 @@
     :plaintext="plaintext"
     :iv="iv"
     :key-string="keyString"
+    :salt="salt"
     :is-failed="isFailed"
     @complete="$emit('complete')"
   />
@@ -27,6 +28,10 @@ defineProps({
     default: '',
   },
   keyString: {
+    type: String,
+    default: '',
+  },
+  salt: {
     type: String,
     default: '',
   },

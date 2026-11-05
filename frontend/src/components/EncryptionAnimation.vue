@@ -5,6 +5,7 @@
     :ciphertext="ciphertext"
     :iv="iv"
     :key-string="keyString"
+    :salt="salt"
     :is-failed="false"
     @complete="$emit('complete')"
   />
@@ -27,6 +28,10 @@ defineProps({
     default: '',
   },
   keyString: {
+    type: String,
+    default: '',
+  },
+  salt: {
     type: String,
     default: '',
   },

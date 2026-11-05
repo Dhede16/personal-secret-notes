@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -11,12 +11,14 @@ class NoteCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, description="Title of the secret note")
     ciphertext: str = Field(..., min_length=1, description="Base64 encoded ciphertext")
     iv: str = Field(..., min_length=1, description="Base64 encoded IV")
+    salt: Optional[str] = Field(default=None, description="Base64 encoded PBKDF2 salt")
 
 
 class NoteUpdateRequest(BaseModel):
     title: str = Field(..., min_length=1, description="Title of the secret note")
     ciphertext: str = Field(..., min_length=1, description="Base64 encoded ciphertext")
     iv: str = Field(..., min_length=1, description="Base64 encoded IV")
+    salt: Optional[str] = Field(default=None, description="Base64 encoded PBKDF2 salt")
 
 
 class NoteResponse(BaseModel):
@@ -24,6 +26,7 @@ class NoteResponse(BaseModel):
     title: str
     ciphertext: str
     iv: str
+    salt: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -42,7 +45,7 @@ def create_note(payload: NoteCreateRequest):
     if not payload.iv.strip():
         raise HTTPException(status_code=400, detail="IV cannot be empty.")
 
-    note = storage.create_note(payload.title, payload.ciphertext, payload.iv)
+    note = storage.create_note(payload.title, payload.ciphertext, payload.iv, payload.salt)
     return note
 
 
@@ -55,7 +58,7 @@ def update_note(note_id: str, payload: NoteUpdateRequest):
     if not payload.iv.strip():
         raise HTTPException(status_code=400, detail="IV cannot be empty.")
 
-    updated = storage.update_note(note_id, payload.title, payload.ciphertext, payload.iv)
+    updated = storage.update_note(note_id, payload.title, payload.ciphertext, payload.iv, payload.salt)
     if not updated:
         raise HTTPException(status_code=404, detail="Note not found.")
     return updated

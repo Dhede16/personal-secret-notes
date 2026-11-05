@@ -4,7 +4,7 @@
     @click.self="$emit('close')"
   >
     <div
-      class="w-full max-w-4xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl flex flex-col text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-200 max-h-[95vh] overflow-hidden"
+      class="w-full max-w-6xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl flex flex-col text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-200 max-h-[95vh] overflow-hidden"
     >
       <!-- Modal Header -->
       <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between shrink-0 bg-slate-900/90">
@@ -15,14 +15,14 @@
           <div>
             <div class="flex items-center gap-2 flex-wrap">
               <h2 class="text-sm sm:text-base font-bold text-white">
-                AES-256-GCM Interactive Visualizer Sandbox
+                AES-256-GCM & Key Expansion Full Pipeline Visualizer
               </h2>
               <span class="text-[10px] font-semibold tracking-wider text-emerald-400 bg-emerald-950/80 border border-emerald-500/30 px-2 py-0.5 rounded-full uppercase">
-                128-bit Blocks
+                14 Putaran • 60 Word • GMAC
               </span>
             </div>
             <p class="text-xs text-slate-400">
-              Eksplorasi visual konsep pembagian blok 16-byte, IV, dan GMAC Authentication Tag
+              Eksplorasi visual sangat mendalam untuk setiap proses dan urutan AES-256-GCM, ekspansi kunci, matriks state, dan GMAC tag.
             </p>
           </div>
         </div>
@@ -108,6 +108,7 @@
           :plaintext="inputPlaintext"
           :ciphertext="computedCiphertext"
           :iv="computedIv"
+          :salt="computedSalt"
           :key-string="inputKey"
           :is-embedded="true"
           @complete="onComplete"
@@ -147,6 +148,7 @@ const inputKey = ref('secret-password-123');
 const activeMode = ref('encrypt');
 const computedCiphertext = ref('');
 const computedIv = ref('');
+const computedSalt = ref('');
 const recomputeTrigger = ref(0);
 
 function setMode(mode) {
@@ -160,6 +162,7 @@ async function recomputeCrypto() {
     const result = await encryptNote(inputPlaintext.value, inputKey.value);
     computedCiphertext.value = result.ciphertext;
     computedIv.value = result.iv;
+    computedSalt.value = result.salt;
     recomputeTrigger.value++;
   } catch (e) {
     // ignore temporary input validation

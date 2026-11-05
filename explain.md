@@ -18,20 +18,20 @@ Pada arsitektur aplikasi web konvensional (*Server-Side Encryption*), data teks 
 |  [Plaintext Catatan] + [Kunci / Passphrase]                                 |
 |           │                                                                 |
 |           ▼                                                                 |
-|  [Key Derivation (SHA-256)] ──► Kunci Simetris 256-bit                      |
+|  [PBKDF2-HMAC-SHA-256 + Salt] ──► Kunci Simetris 256-bit                   |
 |  [CSPRNG (12-byte)]         ──► Initialization Vector (IV)                  |
 |           │                                                                 |
 |           ▼                                                                 |
 |  [AES-256-GCM Engine]       ──► Ciphertext + 16-byte GMAC Auth Tag          |
 |           │                                                                 |
 +-----------┼─────────────────────────────────────────────────────────────────+
-            │ (Hanya Ciphertext & IV Base64 yang dikirim lewat HTTP/HTTPS)
+            │ (Ciphertext, IV, salt publik; bukan password atau plaintext)
             ▼
 +-----------------------------------------------------------------------------+
 |                                SERVER (BACKEND)                             |
 |                                                                             |
 |  FastAPI Storage Service:                                                   |
-|  - Menerima ID, Title, Ciphertext (Base64), IV (Base64), Timestamp          |
+|  - Menerima ID, Title, Ciphertext, IV, salt publik, Timestamp               |
 |  - Menyimpan secara atomik ke notes.json                                    |
 |  - SERVER TIDAK PERNAH MENERIMA KUNCI ATAU PLAINTEXT (Zero-Knowledge)       |
 +-----------------------------------------------------------------------------+
@@ -63,13 +63,12 @@ Aplikasi ini menggabungkan beberapa konsep dan algoritma kriptografi modern:
 
 ---
 
-### 2.2. Key Derivation via SHA-256 (Secure Hash Algorithm)
-Pengguna memasukkan kata sandi / passphrase dalam bentuk teks (*human-readable string*). Standar AES-256 membutuhkan kunci biner presisi **32 byte (256 bit)**.
-* Fungsi derivasi mengonversi string passphrase menjadi byte UTF-8 via `TextEncoder`.
-* Menghitung nilai *hash* kriptografis menggunakan `crypto.subtle.digest('SHA-256', keyBytes)`.
-* Nilai digest 32-byte diimpor sebagai `CryptoKey` simetris untuk algoritma `AES-GCM`.
+### 2.2. Key Derivation via PBKDF2-HMAC-SHA-256
+Pengguna memasukkan kata sandi / passphrase dalam bentuk teks. Aplikasi mengubahnya menjadi byte UTF-8, lalu memakai **salt acak 16 byte** dan **600.000 iterasi PBKDF2-HMAC-SHA-256** untuk menghasilkan tepat 32 byte kunci AES-256.
 
-$$\text{CryptoKey} = \text{ImportKey}(\text{SHA-256}(\text{Passphrase}))$$
+$$K = \text{PBKDF2-HMAC-SHA-256}(\text{Passphrase}, \text{Salt}_{16B}, 600000, 32B)$$
+
+Salt disimpan bersama catatan karena bukan rahasia; password dan kunci turunan tidak pernah dikirim ke server. Iterasi berulang memperlambat tebakan password dibanding SHA-256 biasa. Catatan lama yang tidak memiliki salt tetap dibaca memakai derivasi SHA-256 lama, dan akan menggunakan PBKDF2 ketika disimpan ulang.
 
 ---
 
@@ -91,6 +90,48 @@ Saat proses dekripsi, Web Crypto secara otomatis memverifikasi kecocokan tag ini
 
 ---
 
+### 2.5. AES-256 Key Expansion (Key Schedule) Secara Detail
+AES-256 memperluas kunci master 256-bit (32 byte) menjadi **60 word (240 byte)** untuk menghasilkan **15 Round Key ($K_0$ s/d $K_{14}$)**, di mana tiap round key berukuran 16 byte (4 word / 128 bit):
+
+1. **Word Awal ($w_0$ s/d $w_7$)**:
+   Diambil langsung dari 32 byte kunci hasil derivasi:
+   $$w_i = [K_{4i}, K_{4i+1}, K_{4i+2}, K_{4i+3}] \quad \text{untuk } i = 0, \dots, 7$$
+
+2. **Ekspansi Iteratif ($w_8$ s/d $w_{59}$)**:
+   Untuk setiap indeks $i$ dari 8 hingga 59:
+   * **Kasus $i \equiv 0 \pmod 8$**:
+     $$\text{temp} = \text{SubWord}(\text{RotWord}(w_{i-1})) \oplus \text{Rcon}[i/8]$$
+     $$w_i = w_{i-8} \oplus \text{temp}$$
+     * $\text{RotWord}([b_0, b_1, b_2, b_3]) = [b_1, b_2, b_3, b_0]$ (rotasi siklis 1 byte ke kiri).
+     * $\text{SubWord}$ mensubstitusi setiap byte melalui tabel non-linear AES S-Box.
+     * $\text{Rcon}[j] = [\text{RC}[j], 00, 00, 00]$ dengan $\text{RC} = [01, 02, 04, 08, 10, 20, 40]$.
+   * **Kasus $i \equiv 4 \pmod 8$ (Khusus AES-256)**:
+     $$\text{temp} = \text{SubWord}(w_{i-1})$$
+     $$w_i = w_{i-8} \oplus \text{temp}$$
+     *(Catatan: Langkah ini hanya ada pada AES-256, tidak ada pada AES-128/192, untuk menambah derajat non-linearitas).*
+   * **Kasus Lainnya**:
+     $$w_i = w_{i-8} \oplus w_{i-1}$$
+
+3. **Pembentukan 15 Round Key ($K_r$)**:
+   $$K_r = [w_{4r}, w_{4r+1}, w_{4r+2}, w_{4r+3}] \quad \text{untuk } r = 0, 1, \dots, 14$$
+
+---
+
+### 2.6. Mekanisme Otentikasi Integritas GHASH pada Galois Field $\text{GF}(2^{128})$
+Mode Galois/Counter Mode (GCM) mengombinasikan enkripsi stream CTR dengan fungsi otentikasi universal hash GHASH:
+1. **Hash Subkey $H$**:
+   $$H = \text{AES}_K(0^{128})$$
+2. **Perkalian Polinomial $\text{GF}(2^{128})$**:
+   Didefinisikan dengan polinomial reduksi tak tereduksi standar NIST:
+   $$P(x) = x^{128} + x^7 + x^2 + x + 1$$
+3. **Pencacah Awal $J_0$ & Tag**:
+   $$J_0 = IV \parallel 0^{31}1 \quad (12 \text{ byte } IV + \text{0x00000001})$$
+   $$S_0 = \text{AES}_K(J_0)$$
+   $$\text{Tag} = \text{GHASH}_H(C) \oplus S_0$$
+   Blok AAD (jika ada), ciphertext, dan blok panjang keduanya diproses berurutan: $Y_i = (Y_{i-1} \oplus X_i) \bullet H$. Aplikasi saat ini tidak mengirim AAD, jadi hanya ciphertext dan blok panjang yang masuk.
+
+---
+
 ## 🔄 3. Alur Penggunaan Fitur & Algoritmanya Secara Berurutan
 
 Berikut adalah alur lengkap sistem dari sudut pandang interaksi pengguna dan eksekusi algoritma di baliknya:
@@ -107,12 +148,12 @@ sequenceDiagram
     %% CREATE NOTE FLOW
     Note over User, Storage: 1. ALUR PEMBUATAN CATATAN BARU (CREATE & ENCRYPT)
     User->>UI: Input Judul, Plaintext Catatan & Passphrase
-    UI->>Crypto: 1.1 SHA-256(Passphrase) -> 256-bit Key
+    UI->>Crypto: 1.1 PBKDF2(Passphrase, Salt, 600.000) -> 256-bit Key
     UI->>Crypto: 1.2 crypto.getRandomValues(12) -> 12-byte IV
     UI->>Crypto: 1.3 crypto.subtle.encrypt(AES-256-GCM, Key, IV, Plaintext)
     Crypto-->>UI: ArrayBuffer (Ciphertext + 16B Auth Tag)
     UI->>UI: Konversi ArrayBuffer & IV ke format Base64
-    UI->>API: POST /api/notes (Title, Ciphertext Base64, IV Base64)
+    UI->>API: POST /api/notes (Title, Ciphertext, IV, Salt)
     API->>Storage: Tulis JSON secara aman & atomik
     Storage-->>API: Berhasil disimpan
     API-->>UI: 201 Created (ID, Metadata Catatan)
@@ -121,7 +162,7 @@ sequenceDiagram
     %% DECRYPT NOTE FLOW
     Note over User, Storage: 2. ALUR MEMBUKA / MENDEKRIPSI CATATAN (VIEW & DECRYPT)
     User->>UI: Klik Catatan & Masukkan Passphrase
-    UI->>Crypto: 2.1 SHA-256(Passphrase) -> 256-bit Key
+    UI->>Crypto: 2.1 PBKDF2(Passphrase, Salt) -> 256-bit Key
     UI->>UI: Decode Base64 Ciphertext & IV -> ArrayBuffer
     UI->>Crypto: 2.2 crypto.subtle.decrypt(AES-256-GCM, Key, IV, Buffer)
     alt Kunci Benar & Integritas Terverifikasi
@@ -145,7 +186,7 @@ sequenceDiagram
 
 ### 3.1. Fitur 1: Pembuatan Catatan Baru (*Create Note*)
 1. **Input**: Pengguna mengisi `Title`, `Plaintext Content`, dan `Passphrase`.
-2. **Key Derivation**: Passphrase diubah menjadi digest SHA-256 sepanjang 32 byte via `crypto.subtle.digest`.
+2. **Key Derivation**: Passphrase dan salt acak 16 byte diproses dengan PBKDF2-HMAC-SHA-256 sebanyak 600.000 iterasi untuk menghasilkan kunci 32 byte. Format catatan lama tanpa salt tetap menggunakan SHA-256 agar kompatibel.
 3. **Pembangkitan IV**: Pembangkitan 12 byte angka acak semu terdistribusi seragam melalui `crypto.getRandomValues(new Uint8Array(12))`.
 4. **Enkripsi AES-256-GCM**:
    * Plaintext dikonversi ke `Uint8Array` dengan `TextEncoder.encode()`.
@@ -156,8 +197,9 @@ sequenceDiagram
    ```json
    {
      "title": "Rencana Skripsi",
-     "encrypted_content": "k8P+8Z1m...[Base64]...",
-     "iv": "vG7x+A9pL1q4...[Base64]..."
+     "ciphertext": "k8P+8Z1m...[Ciphertext + 16-byte tag, Base64]...",
+     "iv": "vG7x+A9pL1q4...[Base64]...",
+     "salt": "m7A1...[16-byte salt, Base64]"
    }
    ```
 7. **Penyimpanan Server**: Backend (FastAPI) memvalidasi skema data dengan Pydantic, lalu menyimpannya ke `backend/data/notes.json` menggunakan mekanisme penulisan atomik.
@@ -166,7 +208,7 @@ sequenceDiagram
 
 ### 3.2. Fitur 2: Menampilkan Daftar Catatan (*Listing & Preview*)
 1. Klien memanggil HTTP GET ke `/api/notes`.
-2. Server mengembalikan metadata seluruh catatan (ID, judul, IV Base64, Ciphertext Base64, `created_at`, `updated_at`).
+2. Server mengembalikan metadata seluruh catatan (ID, judul, IV, ciphertext, salt publik, `created_at`, `updated_at`).
 3. Catatan dirender dalam grid kartu berstatus **Terkunci (*Locked*)**. Konten catatan tidak didekripsi sebelum pengguna secara eksplisit memasukkan kunci.
 
 ---
@@ -176,7 +218,7 @@ sequenceDiagram
 2. **Prapemrosesan Biner**:
    * String IV Base64 diubah kembali menjadi `Uint8Array` (12 byte) via `base64ToBuffer`.
    * String Ciphertext Base64 diubah menjadi `ArrayBuffer` via `base64ToBuffer`.
-3. **Derivasi Kunci**: Passphrase di-*hash* dengan SHA-256 untuk merekonstruksi `CryptoKey` simetris 256-bit.
+3. **Derivasi Kunci**: Catatan baru memakai passphrase + salt tersimpan melalui PBKDF2 untuk merekonstruksi `CryptoKey` 256-bit. Catatan lama tanpa salt memakai jalur SHA-256 kompatibilitas.
 4. **Eksekusi Dekripsi & Validasi Otentikasi**:
    * Klien memanggil `crypto.subtle.decrypt({ name: 'AES-256-GCM', iv }, key, ciphertextBuffer)`.
    * **Dua Kemungkinan Hasil**:
@@ -229,8 +271,9 @@ Untuk tujuan presentasi dan edukasi konsep kriptografi, aplikasi menyertakan mod
   {
     "id": "c7a8b9e0-1234-5678-9abc-def012345678",
     "title": "Catatan Rahasia Skripsi",
-    "encrypted_content": "3kJf9/Pq2...[Ciphertext + 16B Tag dalam Base64]...",
+    "ciphertext": "3kJf9/Pq2...[Ciphertext + 16B Tag dalam Base64]...",
     "iv": "X8vQ2m1kL9p0...[12-byte IV dalam Base64]...",
+    "salt": "m7A1...[16-byte PBKDF2 salt dalam Base64]...",
     "created_at": "2026-09-29T11:30:00Z",
     "updated_at": "2026-09-29T11:30:00Z"
   }
@@ -257,7 +300,7 @@ Untuk tujuan presentasi dan edukasi konsep kriptografi, aplikasi menyertakan mod
 
 | Ancaman / Skenario Kejahatan Siber | Mitigasi pada Secret Notes | Status |
 | :--- | :--- | :---: |
-| **Penyadapan Database Server (*Database Breach*)** | Server hanya menyimpan ciphertext Base64. Tanpa passphrase yang ada di kepala pengguna, penyerang tidak dapat membaca isi catatan. | ✅ Aman |
+| **Penyadapan Database Server (*Database Breach*)** | Server menyimpan ciphertext, IV, dan salt publik. Tanpa passphrase, penyerang tidak dapat membaca isi catatan; salt bukan kunci rahasia. | ✅ Aman |
 | **Manipulasi Ciphertext (*Man-In-The-Middle / Bit-Flipping*)** | 16-Byte GMAC Authentication Tag akan gagal diverifikasi saat dekripsi, sehingga manipulasi seketika terdeteksi dan dibatalkan. | ✅ Aman |
 | **Serangan *Known-Plaintext* atau *Two-Time Pad*** | Setiap catatan dan setiap pembaruan catatan selalu menggunakan **Fresh 12-byte CSPRNG IV**. | ✅ Aman |
 | **Pencurian Kunci via XSS Persisten** | Kunci tidak disimpan di `localStorage` maupun `cookies`. Kunci hanya berada di variabel lokal memori RAM dan dapat dihapus seketika via fitur *Lock*. | ✅ Aman |
@@ -289,13 +332,13 @@ Untuk tujuan presentasi dan edukasi konsep kriptografi, aplikasi menyertakan mod
 
 ### Pertanyaan 4: Apakah server backend dapat memulihkan kata sandi jika pengguna lupa?
 > **Jawaban**:
-> **Tidak bisa**. Sesuai dengan filosofi **Zero-Knowledge Architecture**, server tidak pernah menyimpan *hash* kata sandi, tidak menyimpan *salt*, dan tidak menyimpan kunci dekripsi. Konsekuensi dari keamanan mutlak ini adalah jika pengguna lupa kata sandi, data catatan terenkripsi tersebut tidak dapat dipulihkan oleh pihak mana pun (*unrecoverable*).
+> **Tidak bisa**. Sesuai dengan filosofi **Zero-Knowledge Architecture**, server tidak pernah menyimpan password atau kunci dekripsi. Server menyimpan salt PBKDF2 karena salt bukan rahasia. Jika pengguna lupa password, data catatan terenkripsi tetap tidak dapat dipulihkan (*unrecoverable*).
 
 ---
 
-### Pertanyaan 5: Mengapa digunakan SHA-256 untuk derivasi kunci?
+### Pertanyaan 5: Mengapa digunakan PBKDF2 dan salt untuk derivasi kunci?
 > **Jawaban**:
-> AES-256 memerlukan panjang kunci biner tepat 256 bit (32 byte). Panjang kata sandi yang diketikkan pengguna bersifat dinamis (misal 6 karakter atau 20 karakter). Fungsi *cryptographic hash* SHA-256 memetakan string dengan panjang berapapun menjadi digest tetap 256-bit dengan distribusi entropi yang merata, memenuhi syarat input `importKey` AES-256-GCM.
+> AES-256 memerlukan kunci tepat 32 byte. PBKDF2-HMAC-SHA-256 menghasilkan ukuran tersebut dari password dengan salt acak dan 600.000 iterasi. Salt mencegah password yang sama menghasilkan kunci yang sama; iterasi memperlambat percobaan password. SHA-256 biasa hanya dipertahankan untuk membaca catatan lama.
 
 ---
 

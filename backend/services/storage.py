@@ -58,7 +58,7 @@ def get_note_by_id(note_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def create_note(title: str, ciphertext: str, iv: str) -> Dict[str, Any]:
+def create_note(title: str, ciphertext: str, iv: str, salt: Optional[str] = None) -> Dict[str, Any]:
     notes = get_all_notes()
     now_iso = datetime.now(timezone.utc).isoformat()
     new_note = {
@@ -69,12 +69,20 @@ def create_note(title: str, ciphertext: str, iv: str) -> Dict[str, Any]:
         "created_at": now_iso,
         "updated_at": now_iso,
     }
+    if salt is not None:
+        new_note["salt"] = salt
     notes.insert(0, new_note)
     _write_raw({"notes": notes})
     return new_note
 
 
-def update_note(note_id: str, title: str, ciphertext: str, iv: str) -> Optional[Dict[str, Any]]:
+def update_note(
+    note_id: str,
+    title: str,
+    ciphertext: str,
+    iv: str,
+    salt: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     notes = get_all_notes()
     now_iso = datetime.now(timezone.utc).isoformat()
     updated_note = None
@@ -83,6 +91,10 @@ def update_note(note_id: str, title: str, ciphertext: str, iv: str) -> Optional[
             note["title"] = title.strip()
             note["ciphertext"] = ciphertext
             note["iv"] = iv
+            if salt is None:
+                note.pop("salt", None)
+            else:
+                note["salt"] = salt
             note["updated_at"] = now_iso
             updated_note = note
             break

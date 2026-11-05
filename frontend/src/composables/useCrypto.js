@@ -181,27 +181,256 @@ export function createAes256EncryptionTrace(inputBlock, roundKeys) {
   return trace;
 }
 
-async function deriveKeyBytes(keyString) {
+export { AES_SBOX, AES_RCON };
+
+/**
+ * Multiplication in GF(2^128) according to NIST SP 800-38D (Algorithm 1)
+ * Standard irreducible polynomial: P(x) = x^128 + x^7 + x^2 + x + 1
+ * Reduction constant R = 0xe1000000000000000000000000000000
+ */
+export function gf128Multiply(X, Y) {
+  const Z = new Uint8Array(16);
+  const V = new Uint8Array(Y);
+  for (let i = 0; i < 128; i++) {
+    const byteIndex = Math.floor(i / 8);
+    const bitIndex = 7 - (i % 8);
+    if ((X[byteIndex] >> bitIndex) & 1) {
+      for (let j = 0; j < 16; j++) Z[j] ^= V[j];
+    }
+    const lsb = V[15] & 1;
+    for (let j = 15; j > 0; j--) {
+      V[j] = (V[j] >>> 1) | ((V[j - 1] & 1) << 7);
+    }
+    V[0] >>>= 1;
+    if (lsb === 1) V[0] ^= 0xe1;
+  }
+  return Z;
+}
+
+export const PBKDF2_ITERATIONS = 600000;
+
+/**
+ * Computes all mathematical and cryptographic components of AES-256-GCM:
+ * - Hash Subkey H = AES_K(0^128)
+ * - Initial Counter Block J0 = IV || 0^31 1
+ * - Masking Tag S0 = AES_K(J0)
+ * - Per-block Counter Blocks CB_i = IV || (i + 1)
+ * - Keystreams S_i = AES_K(CB_i)
+ * - GHASH intermediate polynomial calculations over AAD and ciphertext
+ * - Computed Authentication Tag = GHASH_H(C) ^ S0
+ */
+export function computeGcmPipelineDetails({
+  keyBytes,
+  ivBytes,
+  plaintextBytes,
+  ciphertextBytes,
+  tagBytes,
+  aadBytes = new Uint8Array(0),
+}) {
+  if (!keyBytes || keyBytes.length !== 32) {
+    throw new Error('computeGcmPipelineDetails requires a 32-byte key.');
+  }
+  if (!ivBytes || ivBytes.length !== 12) {
+    throw new Error('computeGcmPipelineDetails requires a 12-byte IV.');
+  }
+
+  const { roundKeys, wordSteps } = expandAes256KeyWithDetails(keyBytes);
+
+  // 1. Hash Subkey H = AES_K(0^128)
+  const zeroBlock = new Uint8Array(16);
+  const traceH = createAes256EncryptionTrace(zeroBlock, roundKeys);
+  const H = traceH[14].steps[traceH[14].steps.length - 1].state;
+
+  // 2. Initial Counter J0 = IV || 0^31 1
+  const J0 = new Uint8Array(16);
+  J0.set(ivBytes);
+  new DataView(J0.buffer).setUint32(12, 1, false);
+  const traceJ0 = createAes256EncryptionTrace(J0, roundKeys);
+  const S0 = traceJ0[14].steps[traceJ0[14].steps.length - 1].state;
+
+  // 3. Counter Blocks & Keystream for data
+  const hasCiphertext = ciphertextBytes instanceof Uint8Array;
+  const hasPlaintext = plaintextBytes instanceof Uint8Array;
+  const dataLen = hasCiphertext
+    ? ciphertextBytes.length
+    : hasPlaintext
+    ? plaintextBytes.length
+    : 0;
+  const numBlocks = Math.ceil(dataLen / 16);
+  const counterBlocks = [];
+  const effectiveCiphertext = hasCiphertext ? new Uint8Array(ciphertextBytes) : new Uint8Array(dataLen);
+  const effectivePlaintext = hasPlaintext ? new Uint8Array(plaintextBytes) : new Uint8Array(dataLen);
+
+  for (let i = 0; i < numBlocks; i++) {
+    const counterVal = i + 2; // CB1 = 2, CB2 = 3, ...
+    const CB = new Uint8Array(16);
+    CB.set(ivBytes);
+    new DataView(CB.buffer).setUint32(12, counterVal, false);
+
+    const traceCB = createAes256EncryptionTrace(CB, roundKeys);
+    const keystream = traceCB[14].steps[traceCB[14].steps.length - 1].state;
+
+    const pOffset = i * 16;
+    const chunkLength = Math.min(16, dataLen - pOffset);
+    const pChunk = new Uint8Array(chunkLength);
+    const cChunk = new Uint8Array(chunkLength);
+    for (let j = 0; j < chunkLength; j++) {
+      if (hasCiphertext) {
+        cChunk[j] = ciphertextBytes[pOffset + j];
+        pChunk[j] = ciphertextBytes[pOffset + j] ^ keystream[j];
+      } else {
+        pChunk[j] = plaintextBytes[pOffset + j];
+        cChunk[j] = plaintextBytes[pOffset + j] ^ keystream[j];
+      }
+      effectivePlaintext[pOffset + j] = pChunk[j];
+      effectiveCiphertext[pOffset + j] = cChunk[j];
+    }
+
+    counterBlocks.push({
+      blockIndex: i,
+      counterValue: counterVal,
+      counterBlock: CB,
+      keystream,
+      trace: traceCB,
+      plainChunk: pChunk,
+      cipherChunk: cChunk,
+    });
+  }
+
+  // GHASH authenticates padded AAD, padded ciphertext, and their bit lengths.
+  const ghashSteps = [];
+  let currentY = new Uint8Array(16);
+
+  ghashSteps.push({
+    name: 'Inisialisasi Y₀',
+    description: 'Blok Galois 128-bit nol',
+    inputBlock: new Uint8Array(16),
+    stateY: new Uint8Array(currentY),
+  });
+
+  const aadPaddedBlocks = aadBytes.length ? splitIntoBlocks(aadBytes, 16) : [];
+  const cipherPaddedBlocks = effectiveCiphertext.length ? splitIntoBlocks(effectiveCiphertext, 16) : [];
+  const authenticatedBlocks = [
+    ...aadPaddedBlocks.map((block, index) => ({ block, name: `AAD${index + 1}` })),
+    ...cipherPaddedBlocks.map((block, index) => ({ block, name: `C${index + 1}` })),
+  ];
+  for (const [bIdx, { block: rawChunk, name }] of authenticatedBlocks.entries()) {
+    const block16 = new Uint8Array(16);
+    block16.set(rawChunk);
+
+    const xored = new Uint8Array(16);
+    for (let j = 0; j < 16; j++) {
+      xored[j] = currentY[j] ^ block16[j];
+    }
+    currentY = gf128Multiply(xored, H);
+
+    ghashSteps.push({
+      name: `GHASH Blok ${name}`,
+      description: `(Y${bIdx} ⊕ ${name}) • H dalam GF(2¹²⁸)`,
+      inputBlock: block16,
+      xoredWithY: xored,
+      stateY: new Uint8Array(currentY),
+    });
+  }
+
+  // Length block: 64-bit len(AAD) in bits || 64-bit len(C) in bits
+  const lenBlock = new Uint8Array(16);
+  const aadBitLen = BigInt(aadBytes.length * 8);
+  const cBitLen = BigInt(effectiveCiphertext.length * 8);
+  new DataView(lenBlock.buffer).setBigUint64(0, aadBitLen, false);
+  new DataView(lenBlock.buffer).setBigUint64(8, cBitLen, false);
+
+  const lenXored = new Uint8Array(16);
+  for (let j = 0; j < 16; j++) {
+    lenXored[j] = currentY[j] ^ lenBlock[j];
+  }
+  const ghashFinal = gf128Multiply(lenXored, H);
+
+  ghashSteps.push({
+    name: 'GHASH Length Block',
+    description: `(Y${authenticatedBlocks.length} ⊕ [len(AAD)||len(C)]) • H dalam GF(2¹²⁸)`,
+    inputBlock: lenBlock,
+    xoredWithY: lenXored,
+    stateY: new Uint8Array(ghashFinal),
+  });
+
+  // 5. Final Authentication Tag = GHASH_H(C) ^ S0
+  const computedTag = new Uint8Array(16);
+  for (let j = 0; j < 16; j++) {
+    computedTag[j] = ghashFinal[j] ^ S0[j];
+  }
+
+  let tagMatches = null;
+  if (tagBytes && tagBytes.length === 16) {
+    let difference = 0;
+    for (let j = 0; j < 16; j++) {
+      difference |= tagBytes[j] ^ computedTag[j];
+    }
+    tagMatches = difference === 0;
+  }
+
+  return {
+    roundKeys,
+    wordSteps,
+    H,
+    traceH,
+    J0,
+    S0,
+    traceJ0,
+    counterBlocks,
+    effectivePlaintext,
+    effectiveCiphertext,
+    aadBytes: new Uint8Array(aadBytes),
+    receivedTag: tagBytes && tagBytes.length === 16 ? new Uint8Array(tagBytes) : null,
+    lenBlock,
+    ghashSteps,
+    ghashFinal,
+    computedTag,
+    tagMatches,
+  };
+}
+
+async function deriveKeyBytes(keyString, saltBytes = null) {
   const encoder = new TextEncoder();
   const keyBytes = encoder.encode(keyString);
+  if (saltBytes) {
+    const passwordKey = await crypto.subtle.importKey('raw', keyBytes, 'PBKDF2', false, ['deriveBits']);
+    const derivedBits = await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        hash: 'SHA-256',
+        salt: saltBytes,
+        iterations: PBKDF2_ITERATIONS,
+      },
+      passwordKey,
+      256
+    );
+    return new Uint8Array(derivedBits);
+  }
   return new Uint8Array(await crypto.subtle.digest('SHA-256', keyBytes));
 }
 
-export async function getAes256KeySchedule(keyString) {
-  const keyBytes = await deriveKeyBytes(keyString);
+export async function getAes256KeySchedule(keyString, saltBase64 = '') {
+  const saltBytes = saltBase64 ? new Uint8Array(base64ToBuffer(saltBase64)) : null;
+  if (saltBytes && saltBytes.length !== 16) {
+    throw new Error('PBKDF2 salt must be exactly 16 bytes.');
+  }
+  const keyBytes = await deriveKeyBytes(keyString, saltBytes);
   const expansion = expandAes256KeyWithDetails(keyBytes);
   return {
     keyBytes,
     roundKeys: expansion.roundKeys,
     wordSteps: expansion.wordSteps,
+    saltBytes,
+    legacy: !saltBytes,
   };
 }
 
 /**
  * Derives a 256-bit AES-GCM CryptoKey from user input string using SHA-256
  */
-async function deriveKey(keyString) {
-  const keyBytes = await deriveKeyBytes(keyString);
+async function deriveKey(keyString, saltBytes = null) {
+  const keyBytes = await deriveKeyBytes(keyString, saltBytes);
   return crypto.subtle.importKey(
     'raw',
     keyBytes,
@@ -290,7 +519,7 @@ export function useCrypto() {
    * Encrypts plaintext string using AES-256-GCM with a random 12-byte IV
    * @param {string} plaintext
    * @param {string} keyString
-   * @returns {Promise<{ciphertext: string, iv: string, rawEncrypted: ArrayBuffer}>}
+   * @returns {Promise<{ciphertext: string, iv: string, salt: string, rawEncrypted: ArrayBuffer}>}
    */
   async function encryptNote(plaintext, keyString) {
     if (!plaintext || typeof plaintext !== 'string') {
@@ -300,7 +529,8 @@ export function useCrypto() {
       throw new Error('Encryption key cannot be empty.');
     }
 
-    const key = await deriveKey(keyString);
+    const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+    const key = await deriveKey(keyString, saltBytes);
     const encoder = new TextEncoder();
     const encodedPlaintext = encoder.encode(plaintext);
 
@@ -319,6 +549,7 @@ export function useCrypto() {
     return {
       ciphertext: bufferToBase64(encryptedBuffer),
       iv: bufferToBase64(iv),
+      salt: bufferToBase64(saltBytes),
       rawEncrypted: encryptedBuffer,
     };
   }
@@ -330,7 +561,7 @@ export function useCrypto() {
    * @param {string} keyString
    * @returns {Promise<string>}
    */
-  async function decryptNote(ciphertextBase64, ivBase64, keyString) {
+  async function decryptNote(ciphertextBase64, ivBase64, keyString, saltBase64 = '') {
     if (!ciphertextBase64 || !ivBase64) {
       throw new Error('The encrypted data is invalid or corrupted.');
     }
@@ -339,7 +570,11 @@ export function useCrypto() {
     }
 
     try {
-      const key = await deriveKey(keyString);
+      const saltBytes = saltBase64 ? new Uint8Array(base64ToBuffer(saltBase64)) : null;
+      if (saltBytes && saltBytes.length !== 16) {
+        throw new Error('Invalid PBKDF2 salt.');
+      }
+      const key = await deriveKey(keyString, saltBytes);
       const ciphertextBuffer = base64ToBuffer(ciphertextBase64);
       const ivBuffer = base64ToBuffer(ivBase64);
 

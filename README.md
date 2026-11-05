@@ -8,8 +8,9 @@ A modern, minimalist, private notes web application featuring **Zero-Knowledge C
 
 * **Client-Side Encryption & Decryption**: Cryptographic operations occur solely in the browser. The server never sees plaintext note contents or encryption keys.
 * **AES-256-GCM with Random IV**: Encrypts note contents using 256-bit keys and fresh cryptographically secure random 12-byte initialization vectors (IV) generated via `crypto.getRandomValues()`.
+* **Password-Based Key Derivation**: New notes derive the AES key with PBKDF2-HMAC-SHA-256 (600,000 iterations) and a fresh 16-byte salt. Existing notes without a salt remain readable with the legacy SHA-256 derivation and are upgraded the next time they are saved.
 * **Zero-Knowledge Architecture**: Encryption keys remain only in browser memory while active and are never written to `localStorage`, cookies, or sent over the network.
-* **Animated Cryptographic Pipelines**: Real-time vertical visualization showing plaintext conversion, AES-256-GCM authentication tags, and real ciphertext generation.
+* **Eight-Stage AES-256-GCM Visualizer**: Step through password derivation, key expansion, GCM setup, all 14 AES rounds, CTR, GHASH, tag creation, and authenticated decryption with plain-language explanations.
 * **Metadata & List Preview**: View list of note titles and creation timestamps without decrypting content.
 * **In-Memory Decryption & Lock**: Decrypted content remains in memory and can be instantly locked, clearing the decrypted buffer and key from application state.
 * **Full CRUD Support**: Create, Read (Decrypt), Update (Re-encrypt with new IV), and Delete notes.
@@ -24,10 +25,11 @@ A modern, minimalist, private notes web application featuring **Zero-Knowledge C
 User Input (Plaintext + Passphrase)
    │
    ▼
-Web Crypto API (SHA-256 Key Derivation & AES-256-GCM)
+Web Crypto API (PBKDF2-HMAC-SHA-256 + AES-256-GCM)
    │
-   ├── Ciphertext (Base64)
-   └── Random IV (Base64)
+   ├── Ciphertext + 16-byte tag (Base64)
+   ├── Random IV (Base64)
+   └── Random PBKDF2 salt (Base64)
    │
    ▼
 FastAPI (POST/PUT /api/notes)

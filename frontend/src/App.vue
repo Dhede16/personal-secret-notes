@@ -160,6 +160,7 @@
       :ciphertext="encryptionAnim.ciphertext"
       :iv="encryptionAnim.iv"
       :key-string="encryptionAnim.keyString"
+      :salt="encryptionAnim.salt"
       @complete="onEncryptionAnimComplete"
     />
 
@@ -170,6 +171,7 @@
       :plaintext="decryptionAnim.plaintext"
       :iv="decryptionAnim.iv"
       :key-string="decryptionAnim.keyString"
+      :salt="decryptionAnim.salt"
       :is-failed="decryptionAnim.isFailed"
       @complete="onDecryptionAnimComplete"
     />
@@ -269,7 +271,7 @@ async function handleSaveNote({ id, title, content, key }) {
   isSavingNote.value = true;
   try {
     // Encrypt client-side
-    const { ciphertext, iv } = await encryptNote(content, key);
+    const { ciphertext, iv, salt } = await encryptNote(content, key);
 
     // Close editor modal and trigger animation
     showEditor.value = false;
@@ -277,7 +279,7 @@ async function handleSaveNote({ id, title, content, key }) {
     pendingSaveAction.value = async () => {
       try {
         if (id) {
-          const updated = await api.updateNote(id, { title, ciphertext, iv });
+          const updated = await api.updateNote(id, { title, ciphertext, iv, salt });
           const index = notes.value.findIndex((n) => n.id === id);
           if (index !== -1) {
             notes.value[index] = updated;
@@ -290,7 +292,7 @@ async function handleSaveNote({ id, title, content, key }) {
             viewingFailed.value = false;
           }
         } else {
-          const created = await api.createNote({ title, ciphertext, iv });
+          const created = await api.createNote({ title, ciphertext, iv, salt });
           notes.value.unshift(created);
         }
       } catch (err) {
@@ -305,6 +307,7 @@ async function handleSaveNote({ id, title, content, key }) {
       plaintext: content,
       ciphertext: ciphertext,
       iv: iv,
+      salt,
       keyString: key,
     };
   } catch (err) {
@@ -351,7 +354,7 @@ async function handleKeySubmit(key) {
 
   try {
     // Decrypt client-side
-    const decrypted = await decryptNote(targetNote.ciphertext, targetNote.iv, key);
+    const decrypted = await decryptNote(targetNote.ciphertext, targetNote.iv, key, targetNote.salt);
 
     // Decryption successful! Close key dialog and trigger animation
     closeKeyDialog();
@@ -374,6 +377,7 @@ async function handleKeySubmit(key) {
       ciphertext: targetNote.ciphertext,
       plaintext: decrypted,
       iv: targetNote.iv,
+      salt: targetNote.salt,
       keyString: key,
       isFailed: false,
     };
@@ -393,6 +397,7 @@ async function handleKeySubmit(key) {
       ciphertext: targetNote.ciphertext,
       plaintext: scrambled,
       iv: targetNote.iv,
+      salt: targetNote.salt,
       keyString: key,
       isFailed: true,
     };

@@ -13,11 +13,12 @@ def run_tests():
     initial_len = len(initial_notes)
     
     # 1. Create
-    created = storage.create_note("Test Title", "dGVzdF9jaXBoZXI=", "dGVzdF9pdg==")
+    created = storage.create_note("Test Title", "dGVzdF9jaXBoZXI=", "dGVzdF9pdg==", "c2FsdC0x")
     assert created["id"].startswith("note-"), "ID should start with note-"
     assert created["title"] == "Test Title"
     assert created["ciphertext"] == "dGVzdF9jaXBoZXI="
     assert created["iv"] == "dGVzdF9pdg=="
+    assert created["salt"] == "c2FsdC0x"
     
     # 2. Read
     fetched = storage.get_note_by_id(created["id"])
@@ -25,10 +26,13 @@ def run_tests():
     assert fetched["title"] == "Test Title"
     
     # 3. Update
-    updated = storage.update_note(created["id"], "Updated Title", "bmV3X2NpcGhlcg==", "bmV3X2l2")
+    updated = storage.update_note(
+        created["id"], "Updated Title", "bmV3X2NpcGhlcg==", "bmV3X2l2", "bmV3LXNhbHQ="
+    )
     assert updated is not None
     assert updated["title"] == "Updated Title"
     assert updated["ciphertext"] == "bmV3X2NpcGhlcg=="
+    assert updated["salt"] == "bmV3LXNhbHQ="
     assert updated["updated_at"] >= created["created_at"]
     
     # 4. Delete
