@@ -240,7 +240,7 @@
             <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
               <div class="flex items-center justify-between text-xs font-semibold text-slate-300">
                 <span>Passphrase Pengguna</span>
-                <span class="text-slate-500 font-mono">{{ keyString ? keyString.length : 0 }} Karakter</span>
+              <span class="text-slate-500 font-mono">{{ utf8KeyBytes.length }} Byte UTF-8</span>
               </div>
               <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-lg font-mono text-xs text-indigo-300 break-all select-all">
                 {{ keyString || '(Kunci kosong - masukkan password pada input)' }}
@@ -255,11 +255,14 @@
                     v-for="(b, idx) in utf8KeyBytes"
                     :key="idx"
                     class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300"
-                    :title="`Char '${String.fromCharCode(b)}' = 0x${byteToHex(b)}`"
+                    :title="`Byte UTF-8 ke-${idx}: 0x${byteToHex(b)}`"
                   >
                     {{ byteToHex(b) }}
                   </span>
                 </div>
+                <p class="text-[10px] text-slate-500 leading-relaxed">
+                  Setiap byte di atas menjadi kunci HMAC. Password tidak digabung langsung dengan salt.
+                </p>
               </div>
             </div>
 
@@ -271,6 +274,17 @@
               </div>
               <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-lg font-mono text-xs text-emerald-300 break-all select-all">
                 {{ keyBytesHex || 'Menghitung digest SHA-256...' }}
+              </div>
+              <div v-if="keyBytesHex" class="grid grid-cols-8 gap-1 font-mono text-[9px]">
+                <div
+                  v-for="(b, idx) in masterKeyBytes"
+                  :key="idx"
+                  class="rounded bg-slate-900 border border-emerald-500/20 p-1 text-center"
+                  :title="`Byte ${idx}: 0x${byteToHex(b)}`"
+                >
+                  <span class="block text-slate-500">{{ idx.toString(16).padStart(2, '0') }}</span>
+                  <span class="text-emerald-200">{{ byteToHex(b) }}</span>
+                </div>
               </div>
 
               <!-- Division into first 8 words w[0..7] -->
@@ -301,8 +315,58 @@
             <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-lg font-mono text-xs text-cyan-200 break-all">
               {{ saltHex || 'Tidak tersedia' }}
             </div>
+            <div v-if="keyDerivationMode === 'PBKDF2' && saltBytes.length" class="grid grid-cols-8 gap-1 font-mono text-[9px]">
+              <div
+                v-for="(b, idx) in saltBytes"
+                :key="idx"
+                class="rounded bg-slate-900 border border-cyan-500/20 p-1 text-center"
+                :title="`Byte salt ${idx}: 0x${byteToHex(b)}`"
+              >
+                <span class="block text-slate-500">{{ idx.toString(16).padStart(2, '0') }}</span>
+                <span class="text-cyan-200">{{ byteToHex(b) }}</span>
+              </div>
+            </div>
+            <div v-if="keyDerivationMode === 'PBKDF2' && pbkdf2FirstBlockInput.length" class="space-y-1">
+              <span class="text-[10px] font-semibold text-slate-400">Input HMAC pertama: salt || INT₃₂_BE(1)</span>
+              <div class="grid grid-cols-10 gap-1 font-mono text-[9px]">
+                <div
+                  v-for="(b, idx) in pbkdf2FirstBlockInput"
+                  :key="idx"
+                  class="rounded border p-1 text-center"
+                  :class="idx < 16 ? 'bg-slate-900 border-cyan-500/20 text-cyan-200' : 'bg-amber-950/50 border-amber-500/30 text-amber-200'"
+                  :title="idx < 16 ? `Byte salt ${idx}` : 'Byte counter blok PBKDF2'"
+                >
+                  {{ byteToHex(b) }}
+                </div>
+              </div>
+            </div>
             <p class="text-[11px] leading-relaxed text-slate-400">
               Salt bukan password dan tidak perlu dirahasiakan. Salt membuat password yang sama menghasilkan kunci berbeda serta menghambat tabel tebakan yang dibuat sebelumnya. PBKDF2 mengulang kerja hash agar setiap tebakan password lebih mahal; ini tidak menambah kekuatan password lemah secara ajaib. SHA-256 sekali saja (format catatan lama) tidak memberi perlambatan ini.
+            </p>
+          </div>
+
+          <div class="mt-3 rounded-xl border border-indigo-500/20 bg-indigo-950/20 p-3.5 space-y-3">
+            <h5 class="text-xs font-bold text-indigo-200">Bagaimana byte password dan salt menjadi master key?</h5>
+            <template v-if="keyDerivationMode === 'PBKDF2'">
+              <div class="flex flex-col sm:flex-row sm:items-center gap-2 text-[11px] font-mono text-center">
+                <div class="flex-1 rounded-lg bg-slate-950 border border-indigo-500/20 p-2 text-indigo-200">
+                  Password UTF-8<br><span class="text-slate-400">kunci HMAC</span>
+                </div>
+                <span class="text-slate-500">+</span>
+                <div class="flex-1 rounded-lg bg-slate-950 border border-cyan-500/20 p-2 text-cyan-200">
+                  Salt 16 byte || 00 00 00 01<br><span class="text-slate-400">input HMAC pertama (blok 1)</span>
+                </div>
+                <span class="text-slate-500">→</span>
+                <div class="flex-1 rounded-lg bg-slate-950 border border-amber-500/20 p-2 text-amber-200">
+                  U₁ = HMAC-SHA-256(password, salt || 00000001)
+                </div>
+              </div>
+              <p class="text-[11px] text-slate-300 leading-relaxed">
+                PBKDF2 menghitung U₂ = HMAC(password, U₁), lalu mengulang rantai itu sampai 600.000 putaran. Hasil setiap U di-XOR bersama (T₁ = U₁ ⊕ U₂ ⊕ … ⊕ U₆₀₀₀₀₀); 32 byte T₁ inilah master key AES-256 yang ditampilkan di atas. Jadi password dan salt tidak sekadar ditempel menjadi kunci.
+              </p>
+            </template>
+            <p v-else class="text-[11px] text-slate-300 leading-relaxed">
+              Catatan format lama tidak memiliki salt: seluruh byte UTF-8 password langsung di-hash sekali dengan SHA-256. Digest 32 byte-nya menjadi master key; format baru menggunakan PBKDF2-HMAC-SHA-256.
             </p>
           </div>
         </section>
@@ -349,6 +413,11 @@
               Lainnya: w[i-8] ⊕ w[i-1]
             </span>
           </div>
+
+          <p class="mb-3 rounded-xl border border-violet-500/20 bg-violet-950/20 p-3 text-[11px] leading-relaxed text-slate-300">
+            <strong class="text-violet-200">Cara membacanya:</strong>
+            master key 32 byte dari Tahap 1 dibagi menjadi 8 word awal (masing-masing 4 byte). AES lalu membangkitkan word berikutnya satu per satu hingga 60 word; setiap 4 word berurutan membentuk satu Round Key 16 byte. Round Key inilah yang dipakai AES pada tiap putaran, bukan untuk mengenkripsi password atau plaintext secara langsung.
+          </p>
 
           <!-- 60-Word Selector Grid -->
           <div class="mb-4 bg-slate-950/80 border border-slate-800 rounded-xl p-3">
@@ -398,8 +467,31 @@
             </div>
 
             <!-- Step by Step Operands Breakdown -->
+            <div v-if="!selectedWordStep.initial" class="rounded-xl border border-emerald-500/20 bg-emerald-950/10 p-3 space-y-2">
+              <div class="text-[11px] font-semibold text-emerald-200">
+                XOR dilakukan per byte untuk membentuk w[{{ selectedWordStep.index }}]
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-[10px]">
+                <div
+                  v-for="byteIndex in 4"
+                  :key="byteIndex"
+                  class="rounded-lg border border-slate-800 bg-slate-950/80 p-2 text-center"
+                >
+                  <span class="block text-slate-500">Byte {{ byteIndex - 1 }}</span>
+                  <span class="text-slate-300">{{ byteToHex(selectedWordStep.baseWord[byteIndex - 1]) }}</span>
+                  <span class="text-violet-300"> ⊕ </span>
+                  <span class="text-slate-300">{{ byteToHex(selectedWordStep.tempWord[byteIndex - 1]) }}</span>
+                  <span class="text-slate-500"> = </span>
+                  <span class="font-bold text-emerald-300">{{ byteToHex(selectedWordStep.resultWord[byteIndex - 1]) }}</span>
+                </div>
+              </div>
+              <p class="text-[10px] text-slate-400">
+                XOR membandingkan bit pada posisi yang sama: bit sama menjadi 0, bit berbeda menjadi 1.
+              </p>
+            </div>
+
             <div v-if="selectedWordStep.initial" class="p-3 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono text-slate-300">
-              Word awal ini disalin langsung dari Kunci Master SHA-256 pada offset byte {{ selectedWordStep.index * 4 }} s/d {{ selectedWordStep.index * 4 + 3 }}:
+              Word awal ini disalin langsung dari master key 256-bit Tahap 1 pada offset byte {{ selectedWordStep.index * 4 }} s/d {{ selectedWordStep.index * 4 + 3 }}:
               <div class="mt-2 text-sm font-bold text-emerald-400 tracking-wider">
                 {{ formatWord(selectedWordStep.resultWord) }}
               </div>
@@ -560,6 +652,32 @@
             </div>
             <p class="text-[10px] text-slate-400 leading-relaxed">
               AAD tidak disembunyikan, tetapi ikut diperiksa oleh tag. Contohnya ID catatan atau header. Jika AAD berubah, tag harus gagal. Aplikasi ini saat ini tidak mengirim AAD.
+            </p>
+          </div>
+
+          <div class="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-950/20 p-3.5 space-y-3">
+            <h5 class="text-xs font-bold text-cyan-200">Penjelasan sederhana Tahap 3</h5>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] text-slate-300 leading-relaxed">
+              <p>
+                <strong class="text-cyan-200">IV / Nonce:</strong>
+                angka unik 12 byte untuk setiap enkripsi dengan kunci yang sama. IV bukan rahasia; saat dekripsi, IV dari data terenkripsi digunakan kembali.
+              </p>
+              <p>
+                <strong class="text-amber-200">Hash Subkey H:</strong>
+                dibuat dengan mengenkripsi 16 byte nol memakai kunci. H bukan untuk menyamarkan isi catatan, melainkan dipakai GHASH untuk membantu memeriksa integritas data.
+              </p>
+              <p>
+                <strong class="text-emerald-200">J₀:</strong>
+                gabungan IV dan penanda `00000001`. J₀ menjadi dasar counter GCM sekaligus dipakai untuk membuat bagian kunci pada tag autentikasi.
+              </p>
+              <p>
+                <strong class="text-violet-200">AAD:</strong>
+                metadata opsional yang tetap diperiksa meski tidak disembunyikan. Contohnya ID catatan; aplikasi ini belum menggunakannya.
+              </p>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              <strong class="text-slate-200">Counter data:</strong>
+              AES mengolah CB₁, CB₂, dan seterusnya untuk menghasilkan keystream. Data pertama memakai J₀ + 1 (counter 2); keystream lalu di-XOR dengan plaintext saat enkripsi atau ciphertext saat dekripsi.
             </p>
           </div>
 
@@ -1224,6 +1342,11 @@
               </div>
             </div>
           </div>
+
+          <div class="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-3 text-[11px] leading-relaxed text-slate-300">
+            <strong class="text-emerald-200">Cara membaca:</strong>
+            setiap Counter Block diproses AES untuk menghasilkan keystream; keystream bukan bagian dari password dan dipakai untuk satu blok data (maksimal 16 byte). Jika blok terakhir lebih pendek, hanya byte yang tersedia yang di-XOR—AES-GCM tidak menambahkan padding ke plaintext/ciphertext. Tanda <span class="font-mono text-slate-100">—</span> pada tabel berarti byte itu memang tidak ada.
+          </div>
         </section>
 
         <!-- ========================================================================= -->
@@ -1322,14 +1445,23 @@
               <p class="text-[11px] font-sans leading-relaxed text-slate-400">
                 IV dan tag tidak perlu dirahasiakan. Password/kunci tetap rahasia. IV, ciphertext, dan tag harus tersedia bersama agar data dapat dibuka dan diperiksa.
               </p>
+              <div class="rounded-lg border border-pink-500/20 bg-pink-950/20 p-3 text-[11px] leading-relaxed text-slate-300">
+                <strong class="text-pink-200">Tag bukan enkripsi:</strong>
+                tag tidak menyembunyikan isi. Tag adalah pemeriksa integritas berbasis kunci; saat dekripsi, tag yang diterima harus cocok dengan hasil hitung ulang sebelum plaintext boleh dipakai.
+              </div>
             </div>
 
             <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-4 space-y-2 font-mono text-xs">
-              <div class="font-bold text-slate-300">Yang disimpan / dikirim aplikasi</div>
+              <div class="font-bold text-slate-300">{{ currentMode === 'encrypt' ? 'Paket yang dihasilkan aplikasi' : 'Paket yang diterima aplikasi' }}</div>
               <div class="rounded-lg bg-slate-900 p-2 text-cyan-200 break-all">Salt: {{ saltHex || 'tidak ada (catatan lama)' }}</div>
               <div class="rounded-lg bg-slate-900 p-2 text-emerald-200 break-all">IV: {{ ivHex || 'belum tersedia' }}</div>
               <div class="rounded-lg bg-slate-900 p-2 text-slate-200 break-all">Ciphertext: {{ pipelineDetails ? Array.from(pipelineDetails.effectiveCiphertext, byteToHex).join('') || '(kosong)' : 'Menghitung...' }}</div>
-              <div class="rounded-lg bg-slate-900 p-2 text-pink-200 break-all">Tag: {{ pipelineDetails ? Array.from(pipelineDetails.computedTag, byteToHex).join('') : 'Menghitung...' }}</div>
+              <div class="rounded-lg bg-slate-900 p-2 text-pink-200 break-all">
+                {{ currentMode === 'encrypt' ? 'Tag' : 'Tag diterima' }}:
+                {{ pipelineDetails
+                  ? Array.from(currentMode === 'encrypt' ? pipelineDetails.computedTag : (pipelineDetails.receivedTag || []), byteToHex).join('') || 'tidak tersedia'
+                  : 'Menghitung...' }}
+              </div>
               <p class="text-[11px] font-sans leading-relaxed text-slate-400">
                 Web Crypto API menggabungkan ciphertext dan tag di satu buffer Base64. Backend hanya menyimpan data terenkripsi dan salt; backend tidak menerima password maupun plaintext.
               </p>
@@ -1573,6 +1705,24 @@ const saltHex = computed(() => {
   }
 });
 
+const saltBytes = computed(() => {
+  if (!props.salt) return [];
+  try {
+    const bytes = new Uint8Array(base64ToBuffer(props.salt));
+    return bytes.length === 16 ? Array.from(bytes) : [];
+  } catch {
+    return [];
+  }
+});
+
+const pbkdf2FirstBlockInput = computed(() =>
+  saltBytes.value.length === 16 ? [...saltBytes.value, 0, 0, 0, 1] : []
+);
+
+const masterKeyBytes = computed(() =>
+  keyBytesHex.value.match(/.{2}/g)?.map((byte) => Number.parseInt(byte, 16)) || []
+);
+
 const isTagVerified = computed(() =>
   !props.isFailed && pipelineDetails.value?.tagMatches === true
 );
@@ -1666,14 +1816,12 @@ function getStepDescription(stepName) {
 
 function getDataByteHex(block, offset, dir) {
   if (!block) return '··';
+  const chunk = currentMode.value === 'encrypt'
+    ? (dir === 'in' ? block.plainChunk : block.cipherChunk)
+    : (dir === 'in' ? block.cipherChunk : block.plainChunk);
+  if (offset >= chunk.length) return '—';
   if (dir === 'out' && currentMode.value === 'decrypt' && !isTagVerified.value) return '••';
-  if (dir === 'in') {
-    const chunk = currentMode.value === 'encrypt' ? block.plainChunk : block.cipherChunk;
-    return offset < chunk.length ? byteToHex(chunk[offset]) : '00';
-  } else {
-    const chunk = currentMode.value === 'encrypt' ? block.cipherChunk : block.plainChunk;
-    return offset < chunk.length ? byteToHex(chunk[offset]) : '00';
-  }
+  return byteToHex(chunk[offset]);
 }
 
 async function computePipeline() {
