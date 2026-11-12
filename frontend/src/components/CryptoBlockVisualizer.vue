@@ -1159,105 +1159,467 @@
           </div>
 
           <!-- ========================================================================= -->
-          <!-- INSPEKSI MATRIKS STATE 4×4 DINAMIS                                       -->
+          <!-- INSPEKSI MATRIKS STATE 4×4 DINAMIS & TAHAP PERHITUNGAN                    -->
           <!-- ========================================================================= -->
-          <div v-if="aesSubView === 'matrices' || aesSubView === 'split'" class="space-y-3">
-            <!-- Counter Block Target Selector -->
-            <div class="flex flex-wrap items-center gap-2 text-xs mb-3 bg-slate-950/70 p-2.5 rounded-xl border border-slate-800">
-              <span class="text-slate-400 font-semibold">Pilih Blok Masukan AES:</span>
-              <button
-                v-for="(cb, cbIdx) in (pipelineDetails ? pipelineDetails.counterBlocks : [])"
-                :key="`sel-cb-${cbIdx}`"
-                type="button"
-                @click="selectedTraceIndex = cbIdx"
-                class="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer"
-                :class="selectedTraceIndex === cbIdx ? 'bg-sky-600 text-white shadow' : 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800'"
-              >
-                CB{{ cbIdx + 1 }} (Counter {{ cb.counterValue }})
-              </button>
-              <button
-                type="button"
-                @click="selectedTraceIndex = -1"
-                class="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer"
-                :class="selectedTraceIndex === -1 ? 'bg-amber-600 text-white shadow' : 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800'"
-              >
-                J₀ (Pre-Counter Tag)
-              </button>
-              <button
-                type="button"
-                @click="selectedTraceIndex = -2"
-                class="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer"
-                :class="selectedTraceIndex === -2 ? 'bg-violet-600 text-white shadow' : 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800'"
-              >
-                0¹²⁸ (Hash Subkey H)
-              </button>
+          <div v-if="aesSubView === 'matrices' || aesSubView === 'split'" class="space-y-4">
+            <!-- Controls Bar: Process Direction & View Level -->
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/80 p-3 rounded-xl border border-sky-500/30">
+              <!-- Direction Toggle: Enkripsi vs Dekripsi -->
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="text-xs font-bold text-slate-300">Arah Proses:</span>
+                <div class="inline-flex bg-slate-900 border border-slate-800 p-1 rounded-xl text-xs">
+                  <button
+                    type="button"
+                    @click="aesDirection = 'encrypt'"
+                    class="px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer flex items-center gap-1.5 text-xs"
+                    :class="aesDirection === 'encrypt' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+                  >
+                    <span>🔒</span>
+                    <span>Enkripsi (Plaintext ➔ 14 Ronde ➔ Ciphertext)</span>
+                  </button>
+                  <button
+                    type="button"
+                    @click="aesDirection = 'decrypt'"
+                    class="px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer flex items-center gap-1.5 text-xs"
+                    :class="aesDirection === 'decrypt' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+                  >
+                    <span>🔓</span>
+                    <span>Dekripsi (Ciphertext ➔ 14 Ronde Invers ➔ Plaintext)</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Matrix Detail Mode Toggle -->
+              <div class="flex items-center gap-1.5 self-start sm:self-auto">
+                <span class="text-xs text-slate-400">Detail Tahap:</span>
+                <div class="inline-flex bg-slate-900 border border-slate-800 p-1 rounded-xl text-xs">
+                  <button
+                    type="button"
+                    @click="matrixDetailMode = 'detailed'"
+                    class="px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer flex items-center gap-1 text-xs"
+                    :class="matrixDetailMode === 'detailed' ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+                  >
+                    <span>✨</span>
+                    <span>Tahap Lengkap</span>
+                  </button>
+                  <button
+                    type="button"
+                    @click="matrixDetailMode = 'compact'"
+                    class="px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer flex items-center gap-1 text-xs"
+                    :class="matrixDetailMode === 'compact' ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+                  >
+                    <span>📊</span>
+                    <span>Ringkas (Hanya Hasil 4×4)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Block Selector (Plaintext, Counter Blocks, J0, H) -->
+            <div class="space-y-2 bg-slate-950/70 p-3 rounded-xl border border-slate-800">
+              <div class="flex items-center justify-between text-xs flex-wrap gap-1">
+                <span class="text-slate-300 font-bold flex items-center gap-1.5">
+                  <span class="text-sky-400">❖</span> Pilih Blok Masukan AES-256:
+                </span>
+                <span class="text-[11px] text-slate-400">
+                  {{ selectedBlockType === 'plaintext' ? 'Sedang memeriksa Plain Text Catatan' : 'Sedang memeriksa blok GCM' }}
+                </span>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2 text-xs">
+                <!-- Plaintext Notes Blocks -->
+                <div class="flex items-center gap-1 bg-slate-900/90 p-1 rounded-lg border border-emerald-500/30 flex-wrap">
+                  <span class="text-[10px] uppercase font-bold text-emerald-400 px-1.5">Plaintext:</span>
+                  <button
+                    v-for="(pb, pbIdx) in (pipelineDetails ? pipelineDetails.plaintextBlocks : [])"
+                    :key="`sel-pb-${pbIdx}`"
+                    type="button"
+                    @click="selectTargetBlock('plaintext', pbIdx)"
+                    class="px-2.5 py-1 rounded-md text-xs font-mono font-semibold transition-all cursor-pointer flex items-center gap-1"
+                    :class="selectedBlockType === 'plaintext' && selectedBlockIndex === pbIdx ? 'bg-emerald-600 text-white shadow font-bold ring-1 ring-emerald-300' : 'bg-slate-800 text-emerald-300 hover:bg-slate-700'"
+                  >
+                    <span>📝 P{{ pbIdx + 1 }}</span>
+                    <span class="text-[10px] text-emerald-200 opacity-80 max-w-[120px] truncate">"{{ pb.textPreview }}"</span>
+                  </button>
+                </div>
+
+                <!-- Counter Blocks GCM -->
+                <div class="flex items-center gap-1 bg-slate-900/90 p-1 rounded-lg border border-sky-500/30 flex-wrap">
+                  <span class="text-[10px] uppercase font-bold text-sky-400 px-1.5">Counter GCM:</span>
+                  <button
+                    v-for="(cb, cbIdx) in (pipelineDetails ? pipelineDetails.counterBlocks : [])"
+                    :key="`sel-cb-${cbIdx}`"
+                    type="button"
+                    @click="selectTargetBlock('counter', cbIdx)"
+                    class="px-2 py-1 rounded-md text-xs font-mono font-semibold transition-all cursor-pointer"
+                    :class="selectedBlockType === 'counter' && selectedBlockIndex === cbIdx ? 'bg-sky-600 text-white shadow font-bold ring-1 ring-sky-300' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'"
+                  >
+                    CB{{ cbIdx + 1 }}
+                  </button>
+                </div>
+
+                <!-- Constants: J0 & H -->
+                <button
+                  type="button"
+                  @click="selectTargetBlock('j0', 0)"
+                  class="px-2.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer"
+                  :class="selectedBlockType === 'j0' ? 'bg-amber-600 text-white shadow font-bold ring-1 ring-amber-300' : 'bg-slate-900 border border-slate-800 text-amber-300 hover:bg-slate-800'"
+                >
+                  J₀ (Pre-Counter Tag)
+                </button>
+                <button
+                  type="button"
+                  @click="selectTargetBlock('h', 0)"
+                  class="px-2.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer"
+                  :class="selectedBlockType === 'h' ? 'bg-violet-600 text-white shadow font-bold ring-1 ring-violet-300' : 'bg-slate-900 border border-slate-800 text-violet-300 hover:bg-slate-800'"
+                >
+                  0¹²⁸ (Subkey H)
+                </button>
+              </div>
+            </div>
+
+            <!-- DEDICATED PANEL: Pemetaan Plaintext ke Matriks State 4x4 (FIPS 197) -->
+            <div
+              v-if="selectedBlockType === 'plaintext' && currentPlaintextBlock"
+              class="bg-gradient-to-br from-emerald-950/40 to-slate-950 border border-emerald-500/40 rounded-xl p-4 space-y-3"
+            >
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-500/20 pb-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-md bg-emerald-600/30 border border-emerald-500/40 flex items-center justify-center text-xs">📝</span>
+                  <div>
+                    <h5 class="text-xs font-bold uppercase tracking-wider text-emerald-300">
+                      Pemetaan Plain Text ke Matriks State 4×4 (FIPS 197)
+                    </h5>
+                    <p class="text-[11px] text-slate-400">
+                      Bagaimana teks string pengguna dipecah menjadi 16 byte ASCII dan disusun kolom demi kolom (Column-Major Order).
+                    </p>
+                  </div>
+                </div>
+                <div class="text-[11px] font-mono text-emerald-400 bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-500/30">
+                  Blok P{{ selectedBlockIndex + 1 }} • 16 Byte (128 Bit)
+                </div>
+              </div>
+
+              <!-- 16-Byte Stream Table with ASCII & Position Mapping -->
+              <div>
+                <div class="text-[11px] font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span>Daftar 16 Karakter Plaintext & Alokasi Sel Matriks:</span>
+                  <span class="text-[10px] text-slate-400 font-mono">Posisi = Baris (i mod 4), Kolom (⌊i / 4⌋)</span>
+                </div>
+                <div class="grid grid-cols-4 sm:grid-cols-8 lg:grid-cols-16 gap-1 font-mono text-center">
+                  <div
+                    v-for="m in currentPlaintextBlock.byteMappings"
+                    :key="`map-${m.byteIndex}`"
+                    @click="selectedMatrixCell = { row: m.row, col: m.col }"
+                    class="p-1.5 rounded-lg border text-[10px] transition-all cursor-pointer flex flex-col justify-between"
+                    :class="[
+                      selectedMatrixCell.row === m.row && selectedMatrixCell.col === m.col
+                        ? 'bg-emerald-600 text-white border-emerald-400 shadow-md ring-2 ring-emerald-300'
+                        : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:border-emerald-500/50'
+                    ]"
+                  >
+                    <div class="text-[9px] opacity-70">#{{ m.byteIndex }}</div>
+                    <div class="text-xs font-bold text-amber-300 my-0.5">{{ m.char === ' ' ? '␣' : m.char }}</div>
+                    <div class="text-[10px] font-semibold text-emerald-300">0x{{ byteToHex(m.byteValue) }}</div>
+                    <div class="text-[8px] opacity-80 mt-0.5">[{{ m.row }},{{ m.col }}]</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Explanatory Mapping Box -->
+              <div class="p-2.5 rounded-lg bg-slate-950 border border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                <div class="leading-relaxed text-slate-300 text-[11px]">
+                  <strong class="text-emerald-400">Aturan Column-Major AES:</strong>
+                  Byte 0..3 mengisi <strong>Kolom 0</strong>, Byte 4..7 mengisi <strong>Kolom 1</strong>, Byte 8..11 mengisi <strong>Kolom 2</strong>, dan Byte 12..15 mengisi <strong>Kolom 3</strong>.
+                </div>
+                <div class="text-[11px] font-mono text-sky-300 bg-slate-900 px-2 py-1 rounded border border-slate-800 shrink-0">
+                  State[r, c] = Byte[r + 4 × c]
+                </div>
+              </div>
             </div>
 
             <!-- Round Selector Bar (R0 s/d R14) -->
-            <div class="mb-4 flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin select-none">
-              <button
-                v-for="rNum in 15"
-                :key="rNum - 1"
-                type="button"
-                @click="activeAesRound = rNum - 1"
-                class="shrink-0 px-2.5 py-1 rounded-lg font-mono text-xs transition-all cursor-pointer border"
-                :class="[
-                  activeAesRound === rNum - 1
-                    ? 'border-sky-400 bg-sky-600 text-white font-bold shadow-md ring-1 ring-sky-400/40'
-                    : 'border-slate-800 bg-slate-950/70 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                ]"
-              >
-                R{{ rNum - 1 }}
-              </button>
-            </div>
-
-          <!-- Active Round State & Step Cards -->
-          <div v-if="currentActiveRoundTrace" class="bg-slate-950/90 border border-sky-500/30 rounded-xl p-4 space-y-4">
-            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-              <div class="flex items-center gap-2">
-                <span class="text-xs font-bold font-mono text-sky-300">
-                  Putaran AES {{ currentActiveRoundTrace.round }}
-                </span>
-                <span class="text-[10px] text-slate-400">
-                  {{ currentActiveRoundTrace.round === 0 ? '• Initial AddRoundKey (K₀)' : currentActiveRoundTrace.round === 14 ? '• Putaran Final (Tanpa MixColumns)' : '• Putaran Utama Standar' }}
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <span class="font-semibold text-slate-300">Pilih Putaran (Round 0 – 14):</span>
+                <span class="text-[11px] font-mono text-sky-400">
+                  {{ activeAesRound === 0 ? 'Putaran Awal' : activeAesRound === 14 ? 'Putaran Final' : `Putaran Utama ${activeAesRound}` }}
                 </span>
               </div>
-              <span class="text-[10px] font-mono text-slate-500">Matriks State 4 Baris × 4 Kolom</span>
+              <div class="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin select-none">
+                <button
+                  v-for="rNum in 15"
+                  :key="rNum - 1"
+                  type="button"
+                  @click="activeAesRound = rNum - 1"
+                  class="shrink-0 px-2.5 py-1 rounded-lg font-mono text-xs transition-all cursor-pointer border flex flex-col items-center"
+                  :class="[
+                    activeAesRound === rNum - 1
+                      ? 'border-sky-400 bg-sky-600 text-white font-bold shadow-md ring-1 ring-sky-400/40'
+                      : 'border-slate-800 bg-slate-950/70 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                  ]"
+                >
+                  <span>R{{ rNum - 1 }}</span>
+                  <span class="text-[8px] opacity-70">{{ rNum === 1 ? 'Start' : rNum === 15 ? 'End' : `K${aesDirection === 'decrypt' ? (15 - rNum) : (rNum - 1)}` }}</span>
+                </button>
+              </div>
             </div>
 
-            <!-- Steps in this Round -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              <div
-                v-for="step in currentActiveRoundTrace.steps"
-                :key="step.name"
-                class="bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-2 flex flex-col justify-between"
-              >
-                <div>
-                  <div class="flex items-center justify-between text-xs font-bold text-slate-200 mb-1">
-                    <span>{{ step.name }}</span>
-                    <span class="text-[9px] text-sky-400 uppercase font-semibold">4×4</span>
+            <!-- Active Round State & Step Cards -->
+            <div v-if="currentActiveRoundTrace" class="bg-slate-950/90 border border-sky-500/30 rounded-xl p-4 space-y-4">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold font-mono text-sky-300">
+                    Putaran AES {{ currentActiveRoundTrace.round }} ({{ aesDirection === 'encrypt' ? 'Enkripsi' : 'Dekripsi Invers' }})
+                  </span>
+                  <span class="text-[10px] text-slate-400">
+                    {{ currentActiveRoundTrace.round === 0 ? '• Initial AddRoundKey' : currentActiveRoundTrace.round === 14 ? '• Putaran Final (Tanpa MixColumns)' : '• 4 Transformasi Putaran' }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 text-[10px] font-mono text-slate-400">
+                  <span>Matriks State 4×4</span>
+                  <span>•</span>
+                  <span class="text-sky-400">Klik sel untuk inspeksi kalkulasi</span>
+                </div>
+              </div>
+
+              <!-- Steps in this Round -->
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                <div
+                  v-for="step in currentActiveRoundTrace.steps"
+                  :key="step.name"
+                  class="bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-2.5 flex flex-col justify-between transition-all hover:border-slate-700"
+                >
+                  <div>
+                    <div class="flex items-center justify-between text-xs font-bold text-slate-200 mb-1">
+                      <span class="flex items-center gap-1.5">
+                        <span class="text-sky-400">●</span>
+                        <span>{{ step.name }}</span>
+                      </span>
+                      <span class="text-[9px] px-2 py-0.5 rounded-full bg-sky-950 border border-sky-500/30 text-sky-300 font-mono">
+                        {{ getStepShortTag(step.name) }}
+                      </span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 leading-tight">
+                      {{ getStepDescription(step.name) }}
+                    </p>
                   </div>
-                  <p class="text-[10px] text-slate-400 leading-tight mb-2">
-                    {{ getStepDescription(step.name) }}
-                  </p>
+
+                  <!-- Detailed Step Visualizer: Input State -> Operation -> Output State -->
+                  <div v-if="matrixDetailMode === 'detailed' && step.inputState" class="space-y-2">
+                    <div class="flex items-center justify-between gap-1 text-[9px] font-mono text-slate-400">
+                      <span class="font-semibold text-slate-300">Sebelum:</span>
+                      <span class="text-sky-400 font-bold">{{ getOperationSymbol(step.name) }}</span>
+                      <span class="font-semibold text-emerald-400">Hasil:</span>
+                    </div>
+
+                    <div class="flex items-center justify-between gap-1.5 bg-slate-950 p-1.5 rounded-lg border border-slate-800/80">
+                      <!-- Input 4x4 Grid -->
+                      <div class="flex-1">
+                        <div class="text-[8px] font-semibold text-slate-400 text-center mb-0.5">Input</div>
+                        <div class="grid grid-cols-4 gap-0.5 p-0.5 bg-slate-900 rounded border border-slate-800/80">
+                          <template v-for="r in 4" :key="`in-${r}`">
+                            <span
+                              v-for="c in 4"
+                              :key="`in-${r}-${c}`"
+                              @click="selectedMatrixCell = { row: r - 1, col: c - 1 }"
+                              class="p-0.5 text-center font-mono text-[9px] rounded cursor-pointer transition-all leading-none"
+                              :class="selectedMatrixCell.row === r - 1 && selectedMatrixCell.col === c - 1 ? 'bg-sky-500 text-white font-bold ring-1 ring-sky-300' : 'text-slate-300 hover:bg-slate-800'"
+                              :title="`Sel [${r-1}, ${c-1}]`"
+                            >
+                              {{ byteToHex(step.inputState[(r - 1) + (c - 1) * 4]) }}
+                            </span>
+                          </template>
+                        </div>
+                      </div>
+
+                      <!-- Arrow / Operator -->
+                      <div class="flex flex-col items-center justify-center shrink-0 px-0.5 text-sky-400 font-mono text-[10px] font-bold">
+                        <span>{{ getOperationIcon(step.name) }}</span>
+                      </div>
+
+                      <!-- Output 4x4 Grid -->
+                      <div class="flex-1">
+                        <div class="text-[8px] font-semibold text-emerald-400 text-center mb-0.5">Hasil</div>
+                        <div class="grid grid-cols-4 gap-0.5 p-0.5 bg-slate-900 rounded border border-slate-800/80">
+                          <template v-for="r in 4" :key="`out-${r}`">
+                            <span
+                              v-for="c in 4"
+                              :key="`out-${r}-${c}`"
+                              @click="selectedMatrixCell = { row: r - 1, col: c - 1 }"
+                              class="p-0.5 text-center font-mono text-[9px] rounded cursor-pointer transition-all leading-none"
+                              :class="selectedMatrixCell.row === r - 1 && selectedMatrixCell.col === c - 1 ? 'bg-emerald-500 text-white font-bold ring-1 ring-emerald-300' : 'text-emerald-300 hover:bg-slate-800'"
+                              :title="`Sel [${r-1}, ${c-1}]`"
+                            >
+                              {{ byteToHex(step.state[(r - 1) + (c - 1) * 4]) }}
+                            </span>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Step Calculation Snippet (Explaining HOW it got there) -->
+                    <div class="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[10px] font-mono leading-tight">
+                      <div class="text-[9px] text-sky-400 font-bold mb-0.5">Hitungan Sel [{{ selectedMatrixCell.row }}, {{ selectedMatrixCell.col }}]:</div>
+                      <div class="text-slate-300 text-[9px] break-all">
+                        {{ getCellCalculationQuick(step, selectedMatrixCell.row, selectedMatrixCell.col) }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Compact 4x4 State Grid (When Compact Mode is chosen) -->
+                  <div v-else class="grid grid-cols-4 gap-1 p-1 bg-slate-950 rounded-lg border border-slate-800/80">
+                    <template v-for="row in 4" :key="row">
+                      <span
+                        v-for="col in 4"
+                        :key="`${row}-${col}`"
+                        @click="selectedMatrixCell = { row: row - 1, col: col - 1 }"
+                        class="p-1 rounded text-center font-mono text-[10px] font-bold cursor-pointer transition-all"
+                        :class="selectedMatrixCell.row === row - 1 && selectedMatrixCell.col === col - 1 ? 'bg-sky-500 text-white ring-1 ring-sky-300' : 'bg-slate-900 text-sky-300 hover:bg-slate-800'"
+                      >
+                        {{ byteToHex(step.state[(row - 1) + (col - 1) * 4]) }}
+                      </span>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ========================================================================= -->
+              <!-- BEDAH TAHAP PERHITUNGAN LENGKAP: BAGAIMANA BISA JADI MATRIKS HASIL TERSEBUT -->
+              <!-- ========================================================================= -->
+              <div class="mt-4 pt-4 border-t border-slate-800 space-y-3">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-bold text-white flex items-center gap-1.5">
+                      <span>🔬</span> Bedah Tahap Perhitungan: Bagaimana Matriks Terbentuk
+                    </span>
+                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-sky-950 border border-sky-500/40 text-sky-300 font-mono">
+                      Sel [{{ selectedMatrixCell.row }}, {{ selectedMatrixCell.col }}] Terpilih
+                    </span>
+                  </div>
+                  <span class="text-[10px] text-slate-400">Putaran {{ activeAesRound }} ({{ aesDirection === 'encrypt' ? 'Enkripsi' : 'Dekripsi Invers' }})</span>
                 </div>
 
-                <!-- 4x4 State Grid Representation -->
-                <div class="grid grid-cols-4 gap-1 p-1 bg-slate-950 rounded-lg border border-slate-800/80">
-                  <template v-for="row in 4" :key="row">
-                    <span
-                      v-for="col in 4"
-                      :key="`${row}-${col}`"
-                      class="p-1 rounded bg-slate-900 text-center font-mono text-[10px] font-bold text-sky-300"
+                <!-- Tabbed / Card Breakdown for Each Operation in this Round -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
+                  <!-- Card 1: AddRoundKey Detail -->
+                  <div
+                    v-if="currentActiveRoundTrace.steps.some(s => s.name.includes('AddRoundKey'))"
+                    class="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-2"
+                  >
+                    <div class="flex items-center justify-between font-bold text-sky-300 text-xs border-b border-slate-800 pb-1.5">
+                      <span class="flex items-center gap-1.5">
+                        <span>⊕</span> AddRoundKey (Kombinasi Kunci)
+                      </span>
+                      <span class="text-[10px] font-mono text-slate-400">State ⊕ RoundKey = Hasil</span>
+                    </div>
+                    <p class="text-[11px] text-slate-400 leading-relaxed">
+                      Setiap sel matriks di-XOR bit-per-bit dengan subkunci putaran ini (K{{ aesDirection === 'decrypt' ? (14 - activeAesRound) : activeAesRound }}).
+                    </p>
+                    <div class="p-2 rounded bg-slate-950 border border-slate-800/80 font-mono text-[10px] text-slate-300 space-y-1">
+                      <div class="text-emerald-400 font-bold">Contoh Sel [{{ selectedMatrixCell.row }}, {{ selectedMatrixCell.col }}]:</div>
+                      <div class="flex items-center justify-between">
+                        <span>State Masukan:</span>
+                        <span class="text-sky-300 font-bold">0x{{ byteToHex(getActiveStepInput('AddRoundKey', selectedMatrixCell.row, selectedMatrixCell.col)) }}</span>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <span>Subkunci RoundKey:</span>
+                        <span class="text-amber-300 font-bold">0x{{ byteToHex(getActiveRoundKeyByte(selectedMatrixCell.row, selectedMatrixCell.col)) }}</span>
+                      </div>
+                      <div class="flex items-center justify-between border-t border-slate-800 pt-1 text-emerald-300 font-bold">
+                        <span>Hasil XOR:</span>
+                        <span>0x{{ byteToHex(getActiveStepOutput('AddRoundKey', selectedMatrixCell.row, selectedMatrixCell.col)) }}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Card 2: SubBytes / InvSubBytes Detail -->
+                  <div
+                    v-if="currentActiveRoundTrace.steps.some(s => s.name.includes('SubBytes'))"
+                    class="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-2"
+                  >
+                    <div class="flex items-center justify-between font-bold text-sky-300 text-xs border-b border-slate-800 pb-1.5">
+                      <span class="flex items-center gap-1.5">
+                        <span>🔠</span> {{ aesDirection === 'decrypt' ? 'InvSubBytes (Invers S-Box)' : 'SubBytes (Substitusi S-Box)' }}
+                      </span>
+                      <span class="text-[10px] font-mono text-slate-400">Tabel Rijndael 16×16</span>
+                    </div>
+                    <p class="text-[11px] text-slate-400 leading-relaxed">
+                      Byte masukan dibagi 2 nibble: 4-bit pertama (baris) dan 4-bit kedua (kolom) untuk mencari nilai pengganti non-linear di tabel S-Box.
+                    </p>
+                    <div class="p-2 rounded bg-slate-950 border border-slate-800/80 font-mono text-[10px] text-slate-300 space-y-1">
+                      <div class="text-emerald-400 font-bold">Pemetaan Sel [{{ selectedMatrixCell.row }}, {{ selectedMatrixCell.col }}]:</div>
+                      <div>
+                        Masukan: <span class="text-sky-300 font-bold">0x{{ byteToHex(getActiveStepInput(aesDirection === 'decrypt' ? 'InvSubBytes' : 'SubBytes', selectedMatrixCell.row, selectedMatrixCell.col)) }}</span>
+                        ➔ Baris <span class="text-amber-300 font-bold">{{ ((getActiveStepInput(aesDirection === 'decrypt' ? 'InvSubBytes' : 'SubBytes', selectedMatrixCell.row, selectedMatrixCell.col) >> 4) & 0x0f).toString(16).toUpperCase() }}</span>,
+                        Kolom <span class="text-amber-300 font-bold">{{ (getActiveStepInput(aesDirection === 'decrypt' ? 'InvSubBytes' : 'SubBytes', selectedMatrixCell.row, selectedMatrixCell.col) & 0x0f).toString(16).toUpperCase() }}</span>
+                      </div>
+                      <div class="text-emerald-300 font-bold border-t border-slate-800 pt-1">
+                        Keluaran dari {{ aesDirection === 'decrypt' ? 'Inv S-Box' : 'S-Box' }}: 0x{{ byteToHex(getActiveStepOutput(aesDirection === 'decrypt' ? 'InvSubBytes' : 'SubBytes', selectedMatrixCell.row, selectedMatrixCell.col)) }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Card 3: ShiftRows / InvShiftRows Detail -->
+                  <div
+                    v-if="currentActiveRoundTrace.steps.some(s => s.name.includes('ShiftRows'))"
+                    class="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-2"
+                  >
+                    <div class="flex items-center justify-between font-bold text-sky-300 text-xs border-b border-slate-800 pb-1.5">
+                      <span class="flex items-center gap-1.5">
+                        <span>⇄</span> {{ aesDirection === 'decrypt' ? 'InvShiftRows (Pergeseran Kanan)' : 'ShiftRows (Pergeseran Kiri)' }}
+                      </span>
+                      <span class="text-[10px] font-mono text-slate-400">Rotasi Siklis per Baris</span>
+                    </div>
+                    <div class="space-y-1 font-mono text-[10px]">
+                      <div
+                        v-for="rowInfo in getShiftRowsBreakdown(getActiveStepObject(aesDirection === 'decrypt' ? 'InvShiftRows' : 'ShiftRows'))"
+                        :key="`row-break-${rowInfo.row}`"
+                        class="p-1 rounded bg-slate-950 flex items-center justify-between"
+                        :class="selectedMatrixCell.row === rowInfo.row ? 'border border-sky-500/40' : ''"
+                      >
+                        <span class="text-slate-400">Baris {{ rowInfo.row }} ({{ rowInfo.shift }} byte {{ rowInfo.direction }}):</span>
+                        <div class="flex items-center gap-1 text-[9px]">
+                          <span class="text-slate-400">[{{ rowInfo.original.join(', ') }}]</span>
+                          <span class="text-sky-400">➔</span>
+                          <span class="text-emerald-300 font-bold">[{{ rowInfo.shifted.join(', ') }}]</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Card 4: MixColumns / InvMixColumns Detail -->
+                  <div
+                    v-if="currentActiveRoundTrace.steps.some(s => s.name.includes('MixColumns'))"
+                    class="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-2"
+                  >
+                    <div class="flex items-center justify-between font-bold text-sky-300 text-xs border-b border-slate-800 pb-1.5">
+                      <span class="flex items-center gap-1.5">
+                        <span>⊗</span> {{ aesDirection === 'decrypt' ? 'InvMixColumns (Invers Difusi)' : 'MixColumns (Difusi Kolom)' }}
+                      </span>
+                      <span class="text-[10px] font-mono text-slate-400">Perkalian Polinomial GF(2⁸)</span>
+                    </div>
+                    <div
+                      v-if="getMixColumnsBreakdown(getActiveStepObject(aesDirection === 'decrypt' ? 'InvMixColumns' : 'MixColumns'), selectedMatrixCell.col)"
+                      class="space-y-1.5 font-mono text-[10px] bg-slate-950 p-2 rounded border border-slate-800"
                     >
-                      {{ byteToHex(step.state[(row - 1) + (col - 1) * 4]) }}
-                    </span>
-                  </template>
+                      <div class="text-slate-300 font-bold">
+                        Perkalian Kolom {{ selectedMatrixCell.col }} di GF(2⁸):
+                      </div>
+                      <div class="text-[9px] text-sky-300 break-all leading-tight">
+                        {{ getMixColumnsBreakdown(getActiveStepObject(aesDirection === 'decrypt' ? 'InvMixColumns' : 'MixColumns'), selectedMatrixCell.col).formulaR0 }}
+                      </div>
+                      <div class="text-[9px] text-slate-400 flex flex-wrap gap-2 pt-1 border-t border-slate-800">
+                        <span v-for="(p, pIdx) in getMixColumnsBreakdown(getActiveStepObject(aesDirection === 'decrypt' ? 'InvMixColumns' : 'MixColumns'), selectedMatrixCell.col).productsR0.slice(0, 2)" :key="pIdx">
+                          {{ p }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
       </section>
 
         <!-- ========================================================================= -->
@@ -1545,7 +1907,9 @@ import {
   getAes256KeySchedule,
   computeGcmPipelineDetails,
   AES_SBOX,
-  AES_RCON
+  AES_INV_SBOX,
+  AES_RCON,
+  gfMul
 } from '../composables/useCrypto';
 
 const props = defineProps({
@@ -1602,6 +1966,11 @@ const selectedWordIndex = ref(8); // default to word 8 to show non-trivial step 
 // AES-256 Engine details
 const activeAesRound = ref(0);
 const selectedTraceIndex = ref(0); // 0, 1, ... for CB_i, -1 for J0, -2 for H (0^128)
+const selectedBlockType = ref('plaintext'); // 'plaintext', 'counter', 'j0', 'h'
+const selectedBlockIndex = ref(0);
+const aesDirection = ref(props.mode === 'decrypt' ? 'decrypt' : 'encrypt');
+const matrixDetailMode = ref('detailed'); // 'detailed' vs 'compact'
+const selectedMatrixCell = ref({ row: 0, col: 0 });
 const activeDataBlockIndex = ref(0);
 const aesSubView = ref('diagram'); // 'diagram', 'matrices', 'split'
 const selectedOperation = ref('SubBytes');
@@ -1732,20 +2101,216 @@ const selectedWordStep = computed(() => {
   return wordSteps.value[selectedWordIndex.value] || null;
 });
 
+const currentPlaintextBlock = computed(() => {
+  if (!pipelineDetails.value || !pipelineDetails.value.plaintextBlocks?.length) return null;
+  return pipelineDetails.value.plaintextBlocks[selectedBlockIndex.value] || pipelineDetails.value.plaintextBlocks[0];
+});
+
 const currentActiveRoundTrace = computed(() => {
   if (!pipelineDetails.value) return null;
   let trace = null;
-  if (selectedTraceIndex.value === -1) {
+  if (selectedBlockType.value === 'plaintext' && pipelineDetails.value.plaintextBlocks?.length) {
+    const pb = pipelineDetails.value.plaintextBlocks[selectedBlockIndex.value] || pipelineDetails.value.plaintextBlocks[0];
+    trace = aesDirection.value === 'decrypt' ? pb.traceDec : pb.traceEnc;
+  } else if (selectedBlockType.value === 'counter' && pipelineDetails.value.counterBlocks?.length) {
+    const cb = pipelineDetails.value.counterBlocks[selectedBlockIndex.value] || pipelineDetails.value.counterBlocks[0];
+    trace = cb ? cb.trace : null;
+  } else if (selectedBlockType.value === 'j0') {
+    trace = pipelineDetails.value.traceJ0;
+  } else if (selectedBlockType.value === 'h') {
+    trace = pipelineDetails.value.traceH;
+  } else if (selectedTraceIndex.value === -1) {
     trace = pipelineDetails.value.traceJ0;
   } else if (selectedTraceIndex.value === -2) {
     trace = pipelineDetails.value.traceH;
-  } else {
+  } else if (pipelineDetails.value.counterBlocks?.length) {
     const cb = pipelineDetails.value.counterBlocks[selectedTraceIndex.value] || pipelineDetails.value.counterBlocks[0];
     trace = cb ? cb.trace : null;
   }
   if (!trace || !trace[activeAesRound.value]) return null;
   return trace[activeAesRound.value];
 });
+
+function selectTargetBlock(type, index = 0) {
+  selectedBlockType.value = type;
+  selectedBlockIndex.value = index;
+  selectedMatrixCell.value = { row: 0, col: 0 };
+}
+
+function getOperationSymbol(stepName) {
+  if (stepName.includes('AddRoundKey')) return '⊕ RoundKey';
+  if (stepName === 'SubBytes') return '➔ S-Box';
+  if (stepName === 'InvSubBytes') return '➔ Inv S-Box';
+  if (stepName === 'ShiftRows') return '◄ ShiftRows';
+  if (stepName === 'InvShiftRows') return '► InvShiftRows';
+  if (stepName === 'MixColumns') return '⊗ MixColumns';
+  if (stepName === 'InvMixColumns') return '⊗ InvMixColumns';
+  return '➔';
+}
+
+function getOperationIcon(stepName) {
+  if (stepName.includes('AddRoundKey')) return '⊕';
+  if (stepName.includes('SubBytes')) return '🔠';
+  if (stepName.includes('ShiftRows')) return '⇄';
+  if (stepName.includes('MixColumns')) return '⊗';
+  return '➔';
+}
+
+function getStepShortTag(stepName) {
+  if (stepName.includes('AddRoundKey')) return 'XOR Subkey';
+  if (stepName === 'SubBytes') return 'Substitusi S-Box';
+  if (stepName === 'InvSubBytes') return 'Invers S-Box';
+  if (stepName === 'ShiftRows') return 'Geser Kiri';
+  if (stepName === 'InvShiftRows') return 'Geser Kanan';
+  if (stepName === 'MixColumns') return 'Pencampuran Kolom';
+  if (stepName === 'InvMixColumns') return 'Invers MixColumns';
+  return 'Transformasi';
+}
+
+function getCellCalculationQuick(step, row, col) {
+  if (!step || !step.state) return 'Menunggu kalkulasi...';
+  const idx = row + col * 4;
+  const inState = step.inputState || step.state;
+  const inByte = inState[idx] ?? 0;
+  const outByte = step.state[idx] ?? 0;
+  const inHex = byteToHex(inByte);
+  const outHex = byteToHex(outByte);
+
+  if (step.name.includes('AddRoundKey')) {
+    const rKey = step.roundKey ? step.roundKey[idx] : 0;
+    const rKeyHex = byteToHex(rKey);
+    return `In: 0x${inHex} ⊕ RoundKey: 0x${rKeyHex} = Out: 0x${outHex}`;
+  }
+  if (step.name === 'SubBytes') {
+    const r = (inByte >> 4) & 0x0f;
+    const c = inByte & 0x0f;
+    return `In: 0x${inHex} ➔ S-Box Baris ${r.toString(16).toUpperCase()}, Kolom ${c.toString(16).toUpperCase()} ➔ Out: 0x${outHex}`;
+  }
+  if (step.name === 'InvSubBytes') {
+    const r = (inByte >> 4) & 0x0f;
+    const c = inByte & 0x0f;
+    return `In: 0x${inHex} ➔ Inv-S-Box Baris ${r.toString(16).toUpperCase()}, Kolom ${c.toString(16).toUpperCase()} ➔ Out: 0x${outHex}`;
+  }
+  if (step.name === 'ShiftRows') {
+    const origCol = (col + row) % 4;
+    return `Baris ${row} geser kiri ${row}. Sel [${row},${col}] berasal dari kolom ${origCol} (0x${inHex}) ➔ 0x${outHex}`;
+  }
+  if (step.name === 'InvShiftRows') {
+    const origCol = (col - row + 4) % 4;
+    return `Baris ${row} geser kanan ${row}. Sel [${row},${col}] berasal dari kolom ${origCol} (0x${inHex}) ➔ 0x${outHex}`;
+  }
+  if (step.name === 'MixColumns') {
+    return `Perkalian GF(2⁸) kolom ${col}: baris ${row} matriks Rijndael dikali kolom input ➔ 0x${outHex}`;
+  }
+  if (step.name === 'InvMixColumns') {
+    return `Perkalian invers GF(2⁸) kolom ${col}: baris ${row} matriks invers dikali kolom input ➔ 0x${outHex}`;
+  }
+  return `0x${inHex} ➔ 0x${outHex}`;
+}
+
+function getActiveStepObject(stepName) {
+  if (!currentActiveRoundTrace.value) return null;
+  return currentActiveRoundTrace.value.steps.find((s) => s.name.includes(stepName)) || null;
+}
+
+function getActiveStepInput(stepName, row, col) {
+  const step = getActiveStepObject(stepName);
+  if (!step) return 0;
+  const inState = step.inputState || step.state;
+  return inState[row + col * 4] ?? 0;
+}
+
+function getActiveStepOutput(stepName, row, col) {
+  const step = getActiveStepObject(stepName);
+  if (!step) return 0;
+  return step.state[row + col * 4] ?? 0;
+}
+
+function getActiveRoundKeyByte(row, col) {
+  const step = getActiveStepObject('AddRoundKey');
+  if (step && step.roundKey) {
+    return step.roundKey[row + col * 4] ?? 0;
+  }
+  const rIdx = aesDirection.value === 'decrypt' ? (14 - activeAesRound.value) : activeAesRound.value;
+  const rKey = roundKeys.value[rIdx];
+  return rKey ? rKey[row + col * 4] : 0;
+}
+
+function getShiftRowsBreakdown(step) {
+  if (!step || !step.state) return [];
+  const inState = step.inputState || step.state;
+  const isInv = step.name.includes('Inv');
+  const rows = [];
+  for (let r = 0; r < 4; r++) {
+    const original = [inState[r], inState[r + 4], inState[r + 8], inState[r + 12]];
+    const shifted = [step.state[r], step.state[r + 4], step.state[r + 8], step.state[r + 12]];
+    rows.push({
+      row: r,
+      shift: r,
+      direction: isInv ? 'kanan' : 'kiri',
+      original: original.map(byteToHex),
+      shifted: shifted.map(byteToHex),
+    });
+  }
+  return rows;
+}
+
+function getMixColumnsBreakdown(step, col = 0) {
+  if (!step || !step.state) return null;
+  const inState = step.inputState || step.state;
+  const isInv = step.name.includes('Inv');
+  const off = col * 4;
+  const s0 = inState[off] ?? 0;
+  const s1 = inState[off + 1] ?? 0;
+  const s2 = inState[off + 2] ?? 0;
+  const s3 = inState[off + 3] ?? 0;
+
+  const out0 = step.state[off] ?? 0;
+  const out1 = step.state[off + 1] ?? 0;
+  const out2 = step.state[off + 2] ?? 0;
+  const out3 = step.state[off + 3] ?? 0;
+
+  const matrix = isInv
+    ? [
+        ['0E', '0B', '0D', '09'],
+        ['09', '0E', '0B', '0D'],
+        ['0D', '09', '0E', '0B'],
+        ['0B', '0D', '09', '0E'],
+      ]
+    : [
+        ['02', '03', '01', '01'],
+        ['01', '02', '03', '01'],
+        ['01', '01', '02', '03'],
+        ['03', '01', '01', '02'],
+      ];
+
+  const formulaR0 = isInv
+    ? `({0E} • 0x${byteToHex(s0)}) ⊕ ({0B} • 0x${byteToHex(s1)}) ⊕ ({0D} • 0x${byteToHex(s2)}) ⊕ ({09} • 0x${byteToHex(s3)}) = 0x${byteToHex(out0)}`
+    : `({02} • 0x${byteToHex(s0)}) ⊕ ({03} • 0x${byteToHex(s1)}) ⊕ 0x${byteToHex(s2)} ⊕ 0x${byteToHex(s3)} = 0x${byteToHex(out0)}`;
+
+  const productsR0 = isInv
+    ? [
+        `{0E} • 0x${byteToHex(s0)} = 0x${byteToHex(gfMul(0x0e, s0))}`,
+        `{0B} • 0x${byteToHex(s1)} = 0x${byteToHex(gfMul(0x0b, s1))}`,
+        `{0D} • 0x${byteToHex(s2)} = 0x${byteToHex(gfMul(0x0d, s2))}`,
+        `{09} • 0x${byteToHex(s3)} = 0x${byteToHex(gfMul(0x09, s3))}`,
+      ]
+    : [
+        `{02} • 0x${byteToHex(s0)} = 0x${byteToHex(gfMul(0x02, s0))}`,
+        `{03} • 0x${byteToHex(s1)} = 0x${byteToHex(gfMul(0x03, s1))}`,
+        `{01} • 0x${byteToHex(s2)} = 0x${byteToHex(s2)}`,
+        `{01} • 0x${byteToHex(s3)} = 0x${byteToHex(s3)}`,
+      ];
+
+  return {
+    col,
+    matrix,
+    inputCol: [s0, s1, s2, s3].map(byteToHex),
+    outputCol: [out0, out1, out2, out3].map(byteToHex),
+    formulaR0,
+    productsR0,
+  };
+}
 
 const currentDataBlock = computed(() => {
   if (!pipelineDetails.value || !pipelineDetails.value.counterBlocks.length) return null;
@@ -1805,11 +2370,20 @@ function getStepDescription(stepName) {
   if (stepName === 'SubBytes') {
     return 'Substitusi non-linear setiap byte State dengan nilai pemetaan tabel S-Box.';
   }
+  if (stepName === 'InvSubBytes') {
+    return 'Invers substitusi byte State dengan nilai pemetaan tabel Inverse S-Box.';
+  }
   if (stepName === 'ShiftRows') {
     return 'Pergeseran baris siklis ke kiri: Baris 0 (0), Baris 1 (1), Baris 2 (2), Baris 3 (3).';
   }
+  if (stepName === 'InvShiftRows') {
+    return 'Pergeseran baris siklis ke kanan: Baris 0 (0), Baris 1 (1), Baris 2 (2), Baris 3 (3).';
+  }
   if (stepName === 'MixColumns') {
     return 'Perkalian matriks polinomial pada Galois Field GF(2⁸) mencampur tiap kolom.';
+  }
+  if (stepName === 'InvMixColumns') {
+    return 'Perkalian matriks invers polinomial pada Galois Field GF(2⁸) merekonstruksi tiap kolom.';
   }
   return '';
 }
@@ -1867,6 +2441,14 @@ async function computePipeline() {
 
     if (generation !== pipelineGeneration) return;
     pipelineDetails.value = details;
+
+    if (details.plaintextBlocks && details.plaintextBlocks.length > 0) {
+      selectedBlockType.value = 'plaintext';
+      selectedBlockIndex.value = 0;
+    } else if (details.counterBlocks && details.counterBlocks.length > 0) {
+      selectedBlockType.value = 'counter';
+      selectedBlockIndex.value = 0;
+    }
   } catch (err) {
     console.error('Error computing pipeline details:', err);
   }
@@ -1944,6 +2526,7 @@ watch(
   () => [props.plaintext, props.ciphertext, props.keyString, props.iv, props.salt, props.mode],
   () => {
     currentMode.value = props.mode;
+    aesDirection.value = props.mode === 'decrypt' ? 'decrypt' : 'encrypt';
     computePipeline();
   }
 );

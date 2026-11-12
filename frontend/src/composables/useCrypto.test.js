@@ -4,6 +4,7 @@ import {
   base64ToBuffer,
   bufferToBase64,
   createAes256EncryptionTrace,
+  createAes256DecryptionTrace,
   expandAes256Key,
   computeGcmPipelineDetails,
   gf128Multiply,
@@ -52,6 +53,34 @@ test('shows the AES-256 round operations and produces the FIPS 197 ciphertext', 
     'AddRoundKey',
   ]);
   assert.equal(ciphertext, '8ea2b7ca516745bfeafc49904b496089');
+});
+
+test('decrypts AES-256 ciphertext with inverse cipher operations back to plaintext', () => {
+  const key = Uint8Array.from({ length: 32 }, (_, index) => index);
+  const roundKeys = expandAes256Key(key);
+  const ciphertext = Uint8Array.from(
+    '8ea2b7ca516745bfeafc49904b496089'.match(/.{2}/g),
+    (byte) => Number.parseInt(byte, 16)
+  );
+  const decTrace = createAes256DecryptionTrace(ciphertext, roundKeys);
+  const recoveredPlaintext = Array.from(decTrace.at(-1).steps.at(-1).state, (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
+
+  assert.equal(decTrace.length, 15);
+  assert.deepEqual(decTrace[0].steps.map((step) => step.name), ['AddRoundKey (awal)']);
+  assert.deepEqual(decTrace[1].steps.map((step) => step.name), [
+    'InvShiftRows',
+    'InvSubBytes',
+    'AddRoundKey',
+    'InvMixColumns',
+  ]);
+  assert.deepEqual(decTrace[14].steps.map((step) => step.name), [
+    'InvShiftRows',
+    'InvSubBytes',
+    'AddRoundKey',
+  ]);
+  assert.equal(recoveredPlaintext, '00112233445566778899aabbccddeeff');
 });
 
 test('computes AES-256-GCM pipeline details matching NIST GCM test vectors', () => {

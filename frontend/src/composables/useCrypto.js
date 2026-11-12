@@ -113,6 +113,25 @@ function xtime(byte) {
   return ((byte << 1) ^ ((byte & 0x80) ? 0x11b : 0)) & 0xff;
 }
 
+export function gfMul(a, b) {
+  let p = 0;
+  let aa = a;
+  let bb = b;
+  for (let i = 0; i < 8; i++) {
+    if (bb & 1) p ^= aa;
+    const hi = aa & 0x80;
+    aa = (aa << 1) & 0xff;
+    if (hi) aa ^= 0x1b;
+    bb >>= 1;
+  }
+  return p;
+}
+
+const AES_INV_SBOX = new Uint8Array(256);
+for (let i = 0; i < 256; i++) {
+  AES_INV_SBOX[AES_SBOX[i]] = i;
+}
+
 function mixColumns(state) {
   const output = new Uint8Array(16);
   for (let column = 0; column < 4; column++) {
@@ -127,6 +146,23 @@ function mixColumns(state) {
     output[offset + 1] = a1 ^ all ^ xtime(a1 ^ a2);
     output[offset + 2] = a2 ^ all ^ xtime(a2 ^ a3);
     output[offset + 3] = a3 ^ all ^ xtime(a3 ^ a0);
+  }
+  return output;
+}
+
+export function invMixColumns(state) {
+  const output = new Uint8Array(16);
+  for (let column = 0; column < 4; column++) {
+    const offset = column * 4;
+    const s0 = state[offset];
+    const s1 = state[offset + 1];
+    const s2 = state[offset + 2];
+    const s3 = state[offset + 3];
+
+    output[offset] = gfMul(0x0e, s0) ^ gfMul(0x0b, s1) ^ gfMul(0x0d, s2) ^ gfMul(0x09, s3);
+    output[offset + 1] = gfMul(0x09, s0) ^ gfMul(0x0e, s1) ^ gfMul(0x0b, s2) ^ gfMul(0x0d, s3);
+    output[offset + 2] = gfMul(0x0d, s0) ^ gfMul(0x09, s1) ^ gfMul(0x0e, s2) ^ gfMul(0x0b, s3);
+    output[offset + 3] = gfMul(0x0b, s0) ^ gfMul(0x0d, s1) ^ gfMul(0x09, s2) ^ gfMul(0x0e, s3);
   }
   return output;
 }
@@ -151,14 +187,25 @@ export function createAes256EncryptionTrace(inputBlock, roundKeys) {
   let state = xorRoundKey(inputBlock, roundKeys[0]);
   trace.push({
     round: 0,
-    steps: [{ name: 'AddRoundKey (awal)', state: new Uint8Array(state) }],
+    steps: [{
+      name: 'AddRoundKey (awal)',
+      inputState: new Uint8Array(inputBlock),
+      roundKey: new Uint8Array(roundKeys[0]),
+      state: new Uint8Array(state)
+    }],
   });
 
   for (let round = 1; round <= 14; round++) {
     const steps = [];
+    const beforeSub = new Uint8Array(state);
     state = state.map((byte) => AES_SBOX[byte]);
-    steps.push({ name: 'SubBytes', state: new Uint8Array(state) });
+    steps.push({
+      name: 'SubBytes',
+      inputState: beforeSub,
+      state: new Uint8Array(state)
+    });
 
+    const beforeShift = new Uint8Array(state);
     const shifted = new Uint8Array(16);
     for (let row = 0; row < 4; row++) {
       for (let column = 0; column < 4; column++) {
@@ -166,22 +213,116 @@ export function createAes256EncryptionTrace(inputBlock, roundKeys) {
       }
     }
     state = shifted;
-    steps.push({ name: 'ShiftRows', state: new Uint8Array(state) });
+    steps.push({
+      name: 'ShiftRows',
+      inputState: beforeShift,
+      state: new Uint8Array(state)
+    });
 
     if (round < 14) {
+      const beforeMix = new Uint8Array(state);
       state = mixColumns(state);
-      steps.push({ name: 'MixColumns', state: new Uint8Array(state) });
+      steps.push({
+        name: 'MixColumns',
+        inputState: beforeMix,
+        state: new Uint8Array(state)
+      });
     }
 
+    const beforeAddKey = new Uint8Array(state);
     state = xorRoundKey(state, roundKeys[round]);
-    steps.push({ name: 'AddRoundKey', state: new Uint8Array(state) });
+    steps.push({
+      name: 'AddRoundKey',
+      inputState: beforeAddKey,
+      roundKey: new Uint8Array(roundKeys[round]),
+      state: new Uint8Array(state)
+    });
     trace.push({ round, steps });
   }
 
   return trace;
 }
 
-export { AES_SBOX, AES_RCON };
+/**
+ * Returns the state after each AES-256 inverse cipher decryption operation (FIPS 197).
+ */
+export function createAes256DecryptionTrace(cipherBlock, roundKeys) {
+  if (!(cipherBlock instanceof Uint8Array) || cipherBlock.length !== 16) {
+    throw new Error('AES decryption requires exactly 16 input bytes.');
+  }
+  if (!Array.isArray(roundKeys) || roundKeys.length !== 15 || roundKeys.some((key) => key.length !== 16)) {
+    throw new Error('AES-256 decryption requires 15 round keys of 16 bytes each.');
+  }
+
+  const trace = [];
+  const state0 = xorRoundKey(cipherBlock, roundKeys[14]);
+  trace.push({
+    round: 0,
+    steps: [{
+      name: 'AddRoundKey (awal)',
+      inputState: new Uint8Array(cipherBlock),
+      roundKey: new Uint8Array(roundKeys[14]),
+      state: new Uint8Array(state0)
+    }],
+  });
+
+  let state = state0;
+  for (let round = 1; round <= 14; round++) {
+    const steps = [];
+
+    // 1. InvShiftRows
+    const beforeShift = new Uint8Array(state);
+    const shifted = new Uint8Array(16);
+    for (let row = 0; row < 4; row++) {
+      for (let column = 0; column < 4; column++) {
+        shifted[row + 4 * column] = state[row + 4 * ((column - row + 4) % 4)];
+      }
+    }
+    state = shifted;
+    steps.push({
+      name: 'InvShiftRows',
+      inputState: beforeShift,
+      state: new Uint8Array(state)
+    });
+
+    // 2. InvSubBytes
+    const beforeSub = new Uint8Array(state);
+    state = state.map((byte) => AES_INV_SBOX[byte]);
+    steps.push({
+      name: 'InvSubBytes',
+      inputState: beforeSub,
+      state: new Uint8Array(state)
+    });
+
+    // 3. AddRoundKey (K_{14 - round})
+    const beforeAddKey = new Uint8Array(state);
+    const roundKey = roundKeys[14 - round];
+    state = xorRoundKey(state, roundKey);
+    steps.push({
+      name: 'AddRoundKey',
+      inputState: beforeAddKey,
+      roundKey: new Uint8Array(roundKey),
+      state: new Uint8Array(state)
+    });
+
+    // 4. InvMixColumns (putaran 1 sampai 13)
+    if (round < 14) {
+      const beforeMix = new Uint8Array(state);
+      state = invMixColumns(state);
+      steps.push({
+        name: 'InvMixColumns',
+        inputState: beforeMix,
+        state: new Uint8Array(state)
+      });
+    }
+
+    trace.push({ round, steps });
+  }
+
+  return trace;
+}
+
+export { AES_SBOX, AES_INV_SBOX, AES_RCON };
 
 /**
  * Multiplication in GF(2^128) according to NIST SP 800-38D (Algorithm 1)
@@ -297,6 +438,49 @@ export function computeGcmPipelineDetails({
     });
   }
 
+  // 4. Plaintext Blocks for Direct Inspection & Matrix Mapping
+  const plaintextBlocks = [];
+  const ptLen = effectivePlaintext.length;
+  const numPtBlocks = Math.max(1, Math.ceil(ptLen / 16));
+  for (let i = 0; i < numPtBlocks; i++) {
+    const chunk = new Uint8Array(16);
+    const start = i * 16;
+    const end = Math.min(start + 16, ptLen);
+    if (ptLen > 0 && end > start) {
+      chunk.set(effectivePlaintext.slice(start, end));
+    }
+    const traceEnc = createAes256EncryptionTrace(chunk, roundKeys);
+    const cipherBlock = traceEnc[14].steps[traceEnc[14].steps.length - 1].state;
+    const traceDec = createAes256DecryptionTrace(cipherBlock, roundKeys);
+
+    let textPreview = '';
+    const byteMappings = [];
+    for (let j = 0; j < 16; j++) {
+      const b = chunk[j];
+      const char = (b >= 32 && b <= 126) ? String.fromCharCode(b) : '·';
+      textPreview += char;
+      const row = j % 4;
+      const col = Math.floor(j / 4);
+      byteMappings.push({
+        byteIndex: j,
+        byteValue: b,
+        char: (b >= 32 && b <= 126) ? String.fromCharCode(b) : (b === 0 ? '\\0' : '·'),
+        row,
+        col,
+      });
+    }
+
+    plaintextBlocks.push({
+      blockIndex: i,
+      inputBlock: chunk,
+      textPreview,
+      byteMappings,
+      cipherBlock,
+      traceEnc,
+      traceDec,
+    });
+  }
+
   // GHASH authenticates padded AAD, padded ciphertext, and their bit lengths.
   const ghashSteps = [];
   let currentY = new Uint8Array(16);
@@ -378,6 +562,7 @@ export function computeGcmPipelineDetails({
     S0,
     traceJ0,
     counterBlocks,
+    plaintextBlocks,
     effectivePlaintext,
     effectiveCiphertext,
     aadBytes: new Uint8Array(aadBytes),
